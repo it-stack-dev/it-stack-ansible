@@ -1,0 +1,101 @@
+---
+# roles/keycloak/tasks/realm.yml
+# Configure the it-stack realm, LDAP federation, and OIDC/SAML clients via kcadm.sh.
+# All commands are idempotent — safe to re-run.
+
+- name: "Set kcadm path"
+  ansible.builtin.set_fact:
+    kcadm: "{{ keycloak_install_dir }}/current/bin/kcadm.sh"
+    kc_server: "http://localhost:{{ keycloak_http_port }}"
+
+- name: "Authenticate kcadm to master realm"
+  ansible.builtin.command:
+    cmd: >
+      {{ kcadm }} config credentials
+      --server {{ kc_server }}
+      --realm master
+      --user {{ vault_keycloak_admin_user }}
+      --password {{ vault_keycloak_admin_password }}
+  changed_when: false
+  no_log: true
+  become_user: "{{ keycloak_user }}"
+
+- name: "Check if realm {{ keycloak_realm }} already exists"
+  ansible.builtin.command:
+    cmd: "{{ kcadm }} get realms/{{ keycloak_realm }} --server {{ kc_server }}"
+  register: realm_exists
+  changed_when: false
+  failed_when: false
+  become_user: "{{ keycloak_user }}"
+
+- name: "Create {{ keycloak_realm }} realm"
+  ansible.builtin.command:
+    cmd: >
+      {{ kcadm }} create realms
+      --server {{ kc_server }}
+      -s realm={{ keycloak_realm }}
+      -s enabled=true
+      -s displayName="IT-Stack"
+      -s loginWithEmailAllowed=true
+      -s resetPasswordAllowed=true
+      -s rememberMe=true
+      -s sslRequired=external
+      -s defaultLocale=en
+  when: realm_exists.rc != 0
+  become_user: "{{ keycloak_user }}"
+
+- name: "Configure FreeIPA LDAP user federation"
+  ansible.builtin.template:
+    src: ldap-federation.json.j2
+    dest: /tmp/ldap-federation.json
+    owner: "{{ keycloak_user }}"
+    mode: "0600"
+  no_log: true
+
+- name: "Check if LDAP federation already exists"
+  ansible.builtin.command:
+    cmd: >
+      {{ kcadm }} get components
+      --server {{ kc_server }}
+      -r {{ keycloak_realm }}
+      --query "providerType=org.keycloak.storage.UserStorageProvider"
+  register: ldap_exists
+  changed_when: false
+  become_user: "{{ keycloak_user }}"
+
+- name: "Create LDAP federation (FreeIPA)"
+  ansible.builtin.command:
+    cmd: >
+      {{ kcadm }} create components
+      --server {{ kc_server }}
+      -r {{ keycloak_realm }}
+      -f /tmp/ldap-federation.json
+  when: "'freeipa-ldap' not in ldap_exists.stdout"
+  become_user: "{{ keycloak_user }}"
+  no_log: true
+
+- name: "Remove LDAP federation temp file"
+  ansible.builtin.file:
+    path: /tmp/ldap-federation.json
+    state: absent
+
+- name: "Create OIDC clients for Phase 1+ services"
+  ansible.builtin.command:
+    cmd: >
+      {{ kcadm }} create clients
+      --server {{ kc_server }}
+      -r {{ keycloak_realm }}
+      -s clientId={{ item.client_id }}
+      -s protocol=openid-connect
+      -s "redirectUris=[\"{{ item.redirect_uri }}\"]"
+      -s "webOrigins=[\"{{ item.origin }}\"]"
+      -s standardFlowEnabled=true
+      -s serviceAccountsEnabled=false
+      -s publicClient=false
+  register: create_client
+  changed_when: "'Created new client' in create_client.stdout or create_client.rc == 0"
+  failed_when: false
+  become_user: "{{ keycloak_user }}"
+  loop: "{{ keycloak_oidc_clients }}"
+  loop_control:
+    label: "{{ item.client_id }}"

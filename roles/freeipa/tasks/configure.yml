@@ -1,0 +1,78 @@
+---
+# roles/freeipa/tasks/configure.yml
+# Post-install IPA configuration: groups, service accounts, HBAC.
+# All ipa commands are idempotent (use || true on "already exists" errors).
+
+- name: "Obtain Kerberos ticket for IPA admin"
+  ansible.builtin.shell:
+    cmd: "echo {{ vault_ipa_admin_password }} | kinit admin@{{ freeipa_realm }}"
+  changed_when: false
+  no_log: true
+
+- name: "Create base groups in FreeIPA"
+  ansible.builtin.shell:
+    cmd: >
+      ipa group-add {{ item.name }} --desc="{{ item.desc }}" 2>&1
+      | grep -E 'Added|already exists' || true
+  changed_when: "'Added group' in cmd_result.stdout"
+  register: cmd_result
+  loop: "{{ freeipa_groups }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+- name: "Create service accounts in FreeIPA"
+  ansible.builtin.shell:
+    cmd: >
+      ipa user-add {{ item.uid }}
+      --first="{{ item.uid }}"
+      --last="Service Account"
+      --cn="{{ item.cn }}"
+      --random 2>&1
+      | grep -E 'Added|already exists' || true
+  changed_when: "'Added user' in cmd_result.stdout"
+  register: cmd_result
+  loop: "{{ freeipa_service_accounts }}"
+  loop_control:
+    label: "{{ item.uid }}"
+  no_log: false
+
+- name: "Set service account passwords from vault"
+  ansible.builtin.shell:
+    cmd: >
+      echo -e "{{ lookup('vars', 'vault_svc_' + item.uid.replace('-svc','') + '_pass') }}\n{{ lookup('vars', 'vault_svc_' + item.uid.replace('-svc','') + '_pass') }}"
+      | ipa passwd {{ item.uid }} 2>&1 || true
+  changed_when: false
+  loop: "{{ freeipa_service_accounts }}"
+  loop_control:
+    label: "{{ item.uid }}"
+  no_log: true
+
+- name: "Add service accounts to their groups"
+  ansible.builtin.shell:
+    cmd: >
+      ipa group-add-member {{ item.group }} --users={{ item.uid }} 2>&1
+      | grep -E 'Number of members added|no modifications' || true
+  changed_when: "'Number of members added: 1' in cmd_result.stdout"
+  register: cmd_result
+  loop: "{{ freeipa_service_accounts }}"
+  loop_control:
+    label: "{{ item.uid }} → {{ item.group }}"
+
+- name: "Disable anonymous LDAP bind"
+  ansible.builtin.shell:
+    cmd: >
+      ldapmodify -x -H ldap://localhost -D "cn=Directory Manager"
+      -w {{ vault_ipa_ds_password }} <<EOF
+      dn: cn=config
+      changetype: modify
+      replace: nsslapd-allow-anonymous-access
+      nsslapd-allow-anonymous-access: rootdse
+      EOF
+  changed_when: false
+  no_log: true
+
+- name: "Destroy Kerberos ticket"
+  ansible.builtin.command:
+    cmd: kdestroy
+  changed_when: false
+  ignore_errors: true

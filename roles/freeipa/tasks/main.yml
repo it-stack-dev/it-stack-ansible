@@ -1,0 +1,10 @@
+---
+# roles/freeipa/tasks/main.yml
+
+- name: "Import FreeIPA installation tasks"
+  ansible.builtin.import_tasks: install.yml
+  tags: [freeipa, install]
+
+- name: "Import FreeIPA configuration tasks"
+  ansible.builtin.import_tasks: configure.yml
+  tags: [freeipa, configure]

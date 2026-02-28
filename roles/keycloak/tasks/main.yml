@@ -1,0 +1,14 @@
+---
+# roles/keycloak/tasks/main.yml
+
+- name: "Import Keycloak installation tasks"
+  ansible.builtin.import_tasks: install.yml
+  tags: [keycloak, install]
+
+- name: "Import Keycloak configuration tasks"
+  ansible.builtin.import_tasks: configure.yml
+  tags: [keycloak, configure]
+
+- name: "Import realm and client setup tasks"
+  ansible.builtin.import_tasks: realm.yml
+  tags: [keycloak, realm]

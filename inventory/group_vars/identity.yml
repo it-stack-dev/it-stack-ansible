@@ -1,0 +1,84 @@
+---
+# ============================================================
+# Identity Server Variables (lab-id1)
+# inventory/group_vars/identity.yml
+# ============================================================
+
+# ── FreeIPA ──────────────────────────────────────────────────
+freeipa_domain:         "{{ it_stack_internal_domain }}"
+freeipa_realm:          "INTERNAL.EXAMPLE.COM"
+freeipa_server_fqdn:    "lab-id1.internal.example.com"
+freeipa_ip:             "10.0.50.11"
+freeipa_forwarders:
+  - "1.1.1.1"
+  - "8.8.8.8"
+freeipa_setup_dns:      true
+freeipa_auto_reverse:   true
+freeipa_ntp:            false   # chrony handles NTP separately
+freeipa_no_ntp:         true
+
+# Service accounts to create in FreeIPA
+freeipa_service_accounts:
+  - { uid: "keycloak-svc",    cn: "Keycloak Service Account",    group: "service-accounts" }
+  - { uid: "nextcloud-svc",   cn: "Nextcloud Service Account",   group: "service-accounts" }
+  - { uid: "mattermost-svc",  cn: "Mattermost Service Account",  group: "service-accounts" }
+  - { uid: "zabbix-svc",      cn: "Zabbix Service Account",      group: "service-accounts" }
+
+# Groups to create
+freeipa_groups:
+  - { name: "it-admins",        desc: "IT Administrators" }
+  - { name: "it-users",         desc: "IT Stack Users" }
+  - { name: "service-accounts", desc: "Service Account principals" }
+  - { name: "voip-users",       desc: "VoIP / FreePBX users" }
+
+# HBAC rules (which groups can login to which hosts)
+freeipa_hbac_rules:
+  - name: "admins-all-hosts"
+    usergroups: ["it-admins"]
+    hostgroups: ["ipaservers"]
+    services: ["sshd", "sudo"]
+
+# Firewall ports for FreeIPA
+freeipa_firewall_ports:
+  - { port: 80,  proto: tcp, from: "{{ it_stack_network }}" }
+  - { port: 443, proto: tcp, from: "{{ it_stack_network }}" }
+  - { port: 389, proto: tcp, from: "{{ it_stack_network }}" }
+  - { port: 636, proto: tcp, from: "{{ it_stack_network }}" }
+  - { port: 88,  proto: tcp, from: "{{ it_stack_network }}" }
+  - { port: 88,  proto: udp, from: "{{ it_stack_network }}" }
+  - { port: 464, proto: tcp, from: "{{ it_stack_network }}" }
+  - { port: 464, proto: udp, from: "{{ it_stack_network }}" }
+  - { port: 53,  proto: tcp, from: "{{ it_stack_network }}" }
+  - { port: 53,  proto: udp, from: "{{ it_stack_network }}" }
+
+# ── Keycloak ─────────────────────────────────────────────────
+keycloak_version:       "24.0.5"
+keycloak_install_dir:   "/opt/keycloak"
+keycloak_data_dir:      "/var/lib/keycloak"
+keycloak_log_dir:       "/var/log/keycloak"
+keycloak_user:          "keycloak"
+keycloak_group:         "keycloak"
+keycloak_http_port:     8080
+keycloak_https_port:    8443
+keycloak_bind_address:  "0.0.0.0"
+
+keycloak_db_host:       "10.0.50.12"
+keycloak_db_port:       5432
+keycloak_db_name:       "keycloak"
+keycloak_db_user:       "keycloak"
+# keycloak_db_password  → vault_keycloak_db_password
+
+keycloak_realm:         "it-stack"
+keycloak_java_opts:     "-Xms512m -Xmx1g"
+
+# LDAP federation to FreeIPA
+keycloak_ldap_url:              "ldap://10.0.50.11:389"
+keycloak_ldap_bind_dn:          "uid=keycloak-svc,cn=users,cn=accounts,dc=internal,dc=example,dc=com"
+keycloak_ldap_users_dn:         "cn=users,cn=accounts,dc=internal,dc=example,dc=com"
+keycloak_ldap_groups_dn:        "cn=groups,cn=accounts,dc=internal,dc=example,dc=com"
+keycloak_ldap_sync_interval:    3600   # full sync every hour
+keycloak_ldap_changed_interval: 600    # changed-user sync every 10 min
+
+keycloak_firewall_ports:
+  - { port: 8080, proto: tcp, from: "{{ it_stack_network }}" }
+  - { port: 8443, proto: tcp, from: "{{ it_stack_network }}" }

@@ -1,0 +1,13 @@
+# /etc/chrony/chrony.conf — managed by Ansible (roles/common)
+# {{ ansible_managed }}
+
+{% for server in ntp_servers %}
+pool {{ server }} iburst
+{% endfor %}
+
+keyfile /etc/chrony/chrony.keys
+driftfile /var/lib/chrony/chrony.drift
+logdir /var/log/chrony
+maxupdateskew 100.0
+rtcsync
+makestep 1 3

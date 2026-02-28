@@ -1,0 +1,70 @@
+---
+# roles/traefik/tasks/configure.yml
+
+- name: "Traefik | Deploy main traefik.yml configuration"
+  ansible.builtin.template:
+    src: traefik.yml.j2
+    dest: "{{ traefik_config_dir }}/traefik.yml"
+    owner: "{{ traefik_user }}"
+    group: "{{ traefik_group }}"
+    mode: "0640"
+  notify: restart traefik
+
+- name: "Traefik | Deploy dynamic routers configuration"
+  ansible.builtin.template:
+    src: dynamic/routers.yml.j2
+    dest: "{{ traefik_config_dir }}/dynamic/routers.yml"
+    owner: "{{ traefik_user }}"
+    group: "{{ traefik_group }}"
+    mode: "0640"
+  notify: restart traefik
+
+- name: "Traefik | Deploy dynamic TLS configuration"
+  ansible.builtin.template:
+    src: dynamic/tls.yml.j2
+    dest: "{{ traefik_config_dir }}/dynamic/tls.yml"
+    owner: "{{ traefik_user }}"
+    group: "{{ traefik_group }}"
+    mode: "0640"
+  notify: restart traefik
+
+- name: "Traefik | Deploy systemd service unit"
+  ansible.builtin.template:
+    src: traefik.service.j2
+    dest: /etc/systemd/system/traefik.service
+    owner: root
+    group: root
+    mode: "0644"
+  notify:
+    - reload systemd
+    - restart traefik
+
+- name: "Traefik | Enable and start traefik service"
+  ansible.builtin.systemd:
+    name: traefik
+    state: started
+    enabled: true
+    daemon_reload: true
+
+- name: "Traefik | Wait for Traefik ping endpoint"
+  ansible.builtin.uri:
+    url: "http://localhost:{{ traefik_http_port }}/ping"
+    status_code: 200
+  register: traefik_ping
+  retries: 12
+  delay: 5
+  until: traefik_ping.status == 200
+
+- name: "Traefik | Verify API is accessible"
+  ansible.builtin.uri:
+    url: "http://localhost:{{ traefik_dashboard_port }}/api/version"
+    user: "{{ traefik_dashboard_user }}"
+    password: "{{ vault_traefik_dashboard_pass }}"
+    force_basic_auth: true
+    status_code: 200
+  register: traefik_api_version
+  no_log: true
+
+- name: "Traefik | Print version info"
+  ansible.builtin.debug:
+    msg: "Traefik version: {{ traefik_api_version.json.Version }}"

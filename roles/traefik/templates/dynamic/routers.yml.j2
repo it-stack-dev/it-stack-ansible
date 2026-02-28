@@ -1,0 +1,76 @@
+# {{ ansible_managed }}
+# Traefik Dynamic Configuration — HTTP Routers & Services
+# Managed by Ansible role: traefik
+
+http:
+  middlewares:
+    # Redirect HTTP → HTTPS
+    redirect-to-https:
+      redirectScheme:
+        scheme: https
+        permanent: true
+
+    # Security headers applied to all services
+    security-headers:
+      headers:
+        sslRedirect: true
+        forceSTSHeader: true
+        stsIncludeSubdomains: true
+        stsPreload: true
+        stsSeconds: 31536000
+        contentTypeNosniff: true
+        browserXssFilter: true
+        referrerPolicy: "strict-origin-when-cross-origin"
+        customFrameOptionsValue: "SAMEORIGIN"
+
+    # Dashboard basic auth
+    dashboard-auth:
+      basicAuth:
+        users:
+          - "{{ traefik_dashboard_user }}:{{ vault_traefik_dashboard_pass | password_hash('bcrypt') }}"
+
+    # Rate limiting for API-facing services
+    rate-limit:
+      rateLimit:
+        average: 100
+        burst: 50
+
+  routers:
+    # Traefik dashboard
+    traefik-dashboard:
+      rule: "Host(`traefik.{{ domain }}`) && (PathPrefix(`/api`) || PathPrefix(`/dashboard`))"
+      service: api@internal
+      middlewares:
+        - dashboard-auth
+        - security-headers
+      tls: {}
+
+{% for router in traefik_routers %}
+    # {{ router.name }} router
+    {{ router.name }}:
+      rule: "Host(`{{ router.host }}`)"
+      service: {{ router.name }}-svc
+      middlewares:
+        - security-headers
+{% if router.middlewares is defined %}
+{% for mw in router.middlewares %}
+        - {{ mw }}
+{% endfor %}
+{% endif %}
+      tls: {}
+
+{% endfor %}
+
+  services:
+{% for router in traefik_routers %}
+    {{ router.name }}-svc:
+      loadBalancer:
+        servers:
+          - url: "{{ router.backend }}"
+        healthCheck:
+          path: "{{ router.health_path | default('/') }}"
+          interval: "30s"
+          timeout: "5s"
+        passHostHeader: true
+
+{% endfor %}

@@ -1,0 +1,90 @@
+---
+# roles/traefik/tasks/install.yml
+
+- name: "Traefik | Create traefik group"
+  ansible.builtin.group:
+    name: "{{ traefik_group }}"
+    system: true
+    state: present
+
+- name: "Traefik | Create traefik user"
+  ansible.builtin.user:
+    name: "{{ traefik_user }}"
+    group: "{{ traefik_group }}"
+    shell: /usr/sbin/nologin
+    home: "{{ traefik_config_dir }}"
+    system: true
+    create_home: false
+    state: present
+
+- name: "Traefik | Create required directories"
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: "{{ traefik_user }}"
+    group: "{{ traefik_group }}"
+    mode: "0755"
+  loop:
+    - "{{ traefik_config_dir }}"
+    - "{{ traefik_config_dir }}/dynamic"
+    - "{{ traefik_log_dir }}"
+    - "{{ traefik_acme_dir }}"
+
+- name: "Traefik | Ensure acme.json has strict permissions"
+  ansible.builtin.file:
+    path: "{{ traefik_acme_dir }}/acme.json"
+    state: touch
+    owner: "{{ traefik_user }}"
+    group: "{{ traefik_group }}"
+    mode: "0600"
+
+- name: "Traefik | Check current binary version"
+  ansible.builtin.command: "{{ traefik_bin_path }} version"
+  register: traefik_current_version
+  failed_when: false
+  changed_when: false
+
+- name: "Traefik | Download Traefik binary"
+  ansible.builtin.get_url:
+    url: "https://github.com/traefik/traefik/releases/download/v{{ traefik_version }}/traefik_v{{ traefik_version }}_linux_amd64.tar.gz"
+    dest: "/tmp/traefik_{{ traefik_version }}.tar.gz"
+    checksum: "sha256:{{ traefik_checksum }}"
+    mode: "0644"
+  when: traefik_version not in (traefik_current_version.stdout | default(''))
+  notify: restart traefik
+
+- name: "Traefik | Extract Traefik binary"
+  ansible.builtin.unarchive:
+    src: "/tmp/traefik_{{ traefik_version }}.tar.gz"
+    dest: /tmp/
+    remote_src: true
+    include:
+      - traefik
+  when: traefik_version not in (traefik_current_version.stdout | default(''))
+
+- name: "Traefik | Install Traefik binary"
+  ansible.builtin.copy:
+    src: /tmp/traefik
+    dest: "{{ traefik_bin_path }}"
+    owner: root
+    group: root
+    mode: "0755"
+    remote_src: true
+  when: traefik_version not in (traefik_current_version.stdout | default(''))
+  notify: restart traefik
+
+- name: "Traefik | Set CAP_NET_BIND_SERVICE capability"
+  community.general.capabilities:
+    path: "{{ traefik_bin_path }}"
+    capability: cap_net_bind_service=+ep
+    state: present
+
+- name: "Traefik | Open firewall ports"
+  community.general.ufw:
+    rule: allow
+    port: "{{ item.port }}"
+    proto: "{{ item.proto }}"
+    src: "{{ item.from | default('any') }}"
+    comment: "Traefik {{ item.port }}"
+  loop: "{{ traefik_firewall_ports }}"
+  notify: reload ufw

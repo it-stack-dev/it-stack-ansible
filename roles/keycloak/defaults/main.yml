@@ -1,0 +1,55 @@
+---
+# roles/keycloak/defaults/main.yml
+
+keycloak_version:        "24.0.5"
+keycloak_install_dir:    "/opt/keycloak"
+keycloak_data_dir:       "/var/lib/keycloak"
+keycloak_log_dir:        "/var/log/keycloak"
+keycloak_user:           "keycloak"
+keycloak_group:          "keycloak"
+
+keycloak_http_port:      8080
+keycloak_https_port:     8443
+keycloak_bind_address:   "0.0.0.0"
+
+keycloak_db_host:        "10.0.50.12"
+keycloak_db_port:        5432
+keycloak_db_name:        "keycloak"
+keycloak_db_user:        "keycloak"
+
+keycloak_realm:          "it-stack"
+keycloak_admin_user:     "admin"
+keycloak_hostname:       "id.example.com"
+
+keycloak_java_opts:      "-Xms512m -Xmx1g"
+
+keycloak_ldap_url:         "ldap://10.0.50.11:389"
+keycloak_ldap_bind_dn:     "uid=keycloak-svc,cn=users,cn=accounts,dc=internal,dc=example,dc=com"
+keycloak_ldap_users_dn:    "cn=users,cn=accounts,dc=internal,dc=example,dc=com"
+keycloak_ldap_groups_dn:   "cn=groups,cn=accounts,dc=internal,dc=example,dc=com"
+keycloak_ldap_sync_interval:    3600
+keycloak_ldap_changed_interval: 600
+
+keycloak_firewall_ports:
+  - { port: "8080", proto: tcp, from: "10.0.50.0/24" }
+  - { port: "8443", proto: tcp, from: "10.0.50.0/24" }
+
+keycloak_oidc_clients:
+  - client_id: nextcloud
+    redirect_uri: "https://cloud.example.com/*"
+    origin: "https://cloud.example.com"
+  - client_id: mattermost
+    redirect_uri: "https://chat.example.com/*"
+    origin: "https://chat.example.com"
+  - client_id: jitsi
+    redirect_uri: "https://meet.example.com/*"
+    origin: "https://meet.example.com"
+  - client_id: odoo
+    redirect_uri: "https://erp.example.com/*"
+    origin: "https://erp.example.com"
+  - client_id: zammad
+    redirect_uri: "https://desk.example.com/*"
+    origin: "https://desk.example.com"
+  - client_id: taiga
+    redirect_uri: "https://pm.example.com/*"
+    origin: "https://pm.example.com"

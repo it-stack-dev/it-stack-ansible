@@ -1,0 +1,34 @@
+# /etc/ssh/sshd_config — managed by Ansible (roles/common)
+# {{ ansible_managed }}
+
+Port {{ ssh_port }}
+AddressFamily inet
+ListenAddress 0.0.0.0
+
+# Authentication
+PermitRootLogin {{ ssh_permit_root_login }}
+PasswordAuthentication {{ ssh_password_authentication }}
+PubkeyAuthentication {{ ssh_pubkey_authentication }}
+AuthorizedKeysFile .ssh/authorized_keys
+MaxAuthTries {{ ssh_max_auth_tries }}
+ChallengeResponseAuthentication no
+UsePAM yes
+KbdInteractiveAuthentication no
+
+# Session
+ClientAliveInterval {{ ssh_client_alive_interval }}
+ClientAliveCountMax {{ ssh_client_alive_count_max }}
+LoginGraceTime 30
+MaxSessions 10
+
+# Subsystems
+Subsystem sftp /usr/lib/openssh/sftp-server
+
+# Logging
+SyslogFacility AUTH
+LogLevel INFO
+
+# Allowed groups
+{% if ssh_allowed_groups is defined %}
+AllowGroups {{ ssh_allowed_groups }}
+{% endif %}

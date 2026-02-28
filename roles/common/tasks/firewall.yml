@@ -1,0 +1,51 @@
+---
+# roles/common/tasks/firewall.yml
+
+- name: "Install ufw"
+  ansible.builtin.apt:
+    name: ufw
+    state: present
+
+- name: "Reset ufw to defaults (idempotent base state)"
+  community.general.ufw:
+    state: reset
+  changed_when: false
+
+- name: "Set default incoming policy to deny"
+  community.general.ufw:
+    direction: incoming
+    policy: "{{ ufw_default_incoming }}"
+
+- name: "Set default outgoing policy to allow"
+  community.general.ufw:
+    direction: outgoing
+    policy: "{{ ufw_default_outgoing }}"
+
+- name: "Allow SSH from LAN"
+  community.general.ufw:
+    rule: allow
+    port: "{{ ssh_port | string }}"
+    proto: tcp
+    src: "{{ ufw_allowed_from_lan }}"
+    comment: "SSH from LAN"
+
+- name: "Allow ICMP (ping) from LAN"
+  ansible.builtin.lineinfile:
+    path: /etc/ufw/before.rules
+    insertafter: "^# ok icmp codes"
+    line: "-A ufw-before-input -s {{ ufw_allowed_from_lan }} -p icmp --icmp-type echo-request -j ACCEPT"
+    state: present
+  notify: reload ufw
+
+- name: "Open service-specific firewall ports"
+  community.general.ufw:
+    rule: allow
+    port: "{{ item.port | string }}"
+    proto: "{{ item.proto }}"
+    src: "{{ item.from }}"
+    comment: "{{ item.comment | default('') }}"
+  loop: "{{ firewall_extra_ports | default([]) }}"
+
+- name: "Enable ufw"
+  community.general.ufw:
+    state: enabled

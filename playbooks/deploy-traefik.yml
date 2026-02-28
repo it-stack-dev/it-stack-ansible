@@ -1,0 +1,66 @@
+---
+# playbooks/deploy-traefik.yml
+# Deploy and configure Traefik reverse proxy on lab-proxy1.
+# Run with: make deploy-traefik
+#
+# Prerequisites:
+#   - Common role applied on lab-proxy1
+#   - FreeIPA running (for internal CA ACME if traefik_tls_mode=internal)
+#   - vault/secrets.yml contains vault_traefik_dashboard_pass
+#
+# What this does:
+#   1. Creates traefik system user/group
+#   2. Downloads Traefik binary v{{ traefik_version }}
+#   3. Creates /etc/traefik/{traefik.yml,dynamic/}
+#   4. Writes tls.yml (ACME/cert config) in dynamic/
+#   5. Writes all router rules to dynamic/routers.yml
+#   6. Creates systemd service, starts and enables
+#   7. Verifies dashboard and health endpoints
+
+- name: "Deploy Traefik Reverse Proxy"
+  hosts: infrastructure
+  gather_facts: true
+  vars_files:
+    - ../vault/secrets.yml
+
+  pre_tasks:
+    - name: "Assert dashboard password is in vault"
+      ansible.builtin.assert:
+        that:
+          - vault_traefik_dashboard_pass is defined
+        fail_msg: "vault_traefik_dashboard_pass missing from vault/secrets.yml"
+
+  roles:
+    - role: common
+      tags: [common]
+    - role: traefik
+      tags: [traefik]
+
+  post_tasks:
+    - name: "Verify Traefik ping endpoint responds"
+      ansible.builtin.uri:
+        url: "http://localhost:{{ traefik_dashboard_port }}/ping"
+        status_code: 200
+      register: traefik_ping
+      retries: 5
+      delay: 5
+      until: traefik_ping.status == 200
+      tags: [verify]
+
+    - name: "Verify Traefik API lists routers"
+      ansible.builtin.uri:
+        url: "http://localhost:{{ traefik_dashboard_port }}/api/http/routers"
+        status_code: 200
+      register: traefik_routers_api
+      tags: [verify]
+
+    - name: "Display Traefik deployment summary"
+      ansible.builtin.debug:
+        msg:
+          - "Traefik {{ traefik_version }} deployed on {{ inventory_hostname }}"
+          - "Dashboard:  http://{{ ansible_host }}:{{ traefik_dashboard_port }}/dashboard/"
+          - "HTTP:       port {{ traefik_http_port }} (→ HTTPS redirect)"
+          - "HTTPS:      port {{ traefik_https_port }}"
+          - "TLS mode:   {{ traefik_tls_mode }}"
+          - "Routers:    {{ traefik_routers | length }} services configured"
+      tags: [verify]

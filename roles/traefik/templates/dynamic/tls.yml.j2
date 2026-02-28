@@ -1,0 +1,28 @@
+# {{ ansible_managed }}
+# Traefik Dynamic Configuration — TLS Settings
+# Managed by Ansible role: traefik
+
+tls:
+  options:
+    default:
+      minVersion: VersionTLS12
+      cipherSuites:
+        - TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256
+        - TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256
+        - TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384
+        - TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384
+        - TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305
+        - TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305
+      sniStrict: true
+      curvePreferences:
+        - CurveP521
+        - CurveP384
+
+    modern:
+      minVersion: VersionTLS13
+
+{% if traefik_tls_mode == 'manual' %}
+  certificates:
+    - certFile: {{ traefik_config_dir }}/certs/fullchain.pem
+      keyFile:  {{ traefik_config_dir }}/certs/privkey.pem
+{% endif %}

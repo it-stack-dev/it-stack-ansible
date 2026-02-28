@@ -1,0 +1,67 @@
+---
+# playbooks/site.yml
+# Master playbook for the complete IT-Stack Phase 1 deployment.
+# Run with: make site
+# Or:       ansible-playbook -i inventory/hosts.ini --vault-password-file .vault_pass playbooks/site.yml
+#
+# Dependency order — do not reorder:
+#   1. common      (all servers — base OS hardening)
+#   2. freeipa     (lab-id1 — DNS must be up before other servers can resolve)
+#   3. postgresql  (lab-db1 — databases must exist before app services start)
+#   4. redis       (lab-db1 — cache layer alongside PostgreSQL)
+#   5. keycloak    (lab-id1 — SSO layer needs IPA + PG)
+#   6. traefik     (lab-proxy1 — routing layer last)
+
+- name: "Phase 1.0 — Common base setup (all servers)"
+  hosts: phase1
+  gather_facts: true
+  vars_files:
+    - ../vault/secrets.yml
+  roles:
+    - role: common
+      tags: [always, common]
+
+- name: "Phase 1.1 — FreeIPA identity server"
+  hosts: identity
+  gather_facts: true
+  vars_files:
+    - ../vault/secrets.yml
+  roles:
+    - role: freeipa
+      tags: [identity, freeipa]
+
+- name: "Phase 1.2 — PostgreSQL database server"
+  hosts: database
+  gather_facts: true
+  vars_files:
+    - ../vault/secrets.yml
+  roles:
+    - role: postgresql
+      tags: [database, postgresql]
+
+- name: "Phase 1.3 — Redis cache server"
+  hosts: database
+  gather_facts: true
+  vars_files:
+    - ../vault/secrets.yml
+  roles:
+    - role: redis
+      tags: [database, redis]
+
+- name: "Phase 1.4 — Keycloak SSO broker"
+  hosts: identity
+  gather_facts: true
+  vars_files:
+    - ../vault/secrets.yml
+  roles:
+    - role: keycloak
+      tags: [identity, keycloak]
+
+- name: "Phase 1.5 — Traefik reverse proxy"
+  hosts: infrastructure
+  gather_facts: true
+  vars_files:
+    - ../vault/secrets.yml
+  roles:
+    - role: traefik
+      tags: [infrastructure, traefik]

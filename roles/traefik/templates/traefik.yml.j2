@@ -1,0 +1,75 @@
+# {{ ansible_managed }}
+# Traefik v{{ traefik_version }} — Static Configuration
+# Managed by Ansible role: traefik
+
+global:
+  checkNewVersion: false
+  sendAnonymousUsage: false
+
+api:
+  dashboard: true
+  # Dashboard is secured via BasicAuth middleware defined in dynamic/routers.yml
+
+ping:
+  entryPoint: web
+
+log:
+  level: {{ traefik_log_level }}
+  filePath: {{ traefik_log_dir }}/traefik.log
+  format: json
+
+{% if traefik_access_log %}
+accessLog:
+  filePath: {{ traefik_log_dir }}/access.log
+  format: json
+  fields:
+    defaultMode: keep
+    headers:
+      defaultMode: drop
+      names:
+        Authorization: redact
+{% endif %}
+
+entryPoints:
+  web:
+    address: ":{{ traefik_http_port }}"
+    http:
+      redirections:
+        entryPoint:
+          to: websecure
+          scheme: https
+          permanent: true
+
+  websecure:
+    address: ":{{ traefik_https_port }}"
+    http:
+      tls:
+{% if traefik_tls_mode == 'letsencrypt' %}
+        certResolver: letsencrypt
+{% elif traefik_tls_mode == 'internal' %}
+        certResolver: internal_ca
+{% endif %}
+
+providers:
+  file:
+    directory: {{ traefik_config_dir }}/dynamic
+    watch: true
+
+{% if traefik_tls_mode == 'letsencrypt' %}
+certificatesResolvers:
+  letsencrypt:
+    acme:
+      email: {{ traefik_acme_email }}
+      storage: {{ traefik_acme_dir }}/acme.json
+      httpChallenge:
+        entryPoint: web
+{% elif traefik_tls_mode == 'internal' %}
+certificatesResolvers:
+  internal_ca:
+    acme:
+      email: {{ traefik_acme_email }}
+      storage: {{ traefik_acme_dir }}/acme.json
+      caServer: {{ traefik_acme_ca_url }}
+      httpChallenge:
+        entryPoint: web
+{% endif %}

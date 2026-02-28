@@ -1,0 +1,34 @@
+---
+# roles/postgresql/tasks/backup.yml
+
+- name: "Deploy pg_backup.sh script"
+  ansible.builtin.template:
+    src: pg_backup.sh.j2
+    dest: /usr/local/bin/pg_backup.sh
+    owner: postgres
+    group: postgres
+    mode: "0750"
+
+- name: "Configure daily PostgreSQL backup cron job"
+  ansible.builtin.cron:
+    name: "IT-Stack PostgreSQL daily backup"
+    minute: "{{ postgresql_backup_minute }}"
+    hour: "{{ postgresql_backup_hour }}"
+    user: postgres
+    job: "/usr/local/bin/pg_backup.sh >> /var/log/postgresql/backup.log 2>&1"
+    state: present
+
+- name: "Configure backup log rotation"
+  ansible.builtin.copy:
+    dest: /etc/logrotate.d/pg_backup
+    content: |
+      /var/log/postgresql/backup.log {
+          weekly
+          rotate 4
+          compress
+          missingok
+          notifempty
+      }
+    owner: root
+    group: root
+    mode: "0644"

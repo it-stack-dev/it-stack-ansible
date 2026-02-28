@@ -1,0 +1,76 @@
+---
+# roles/freeipa/tasks/install.yml
+# Install and initialise FreeIPA server on Ubuntu 24.04.
+# ipaserver package is available in the Ubuntu universe repository.
+
+- name: "Enable universe repository"
+  ansible.builtin.apt_repository:
+    repo: "deb http://archive.ubuntu.com/ubuntu {{ ansible_distribution_release }} universe"
+    state: present
+    update_cache: true
+
+- name: "Install FreeIPA server packages"
+  ansible.builtin.apt:
+    name:
+      - freeipa-server
+      - freeipa-server-dns
+      - freeipa-server-trust-ad
+    state: present
+
+- name: "Ensure ipa-server-install has not already been run"
+  ansible.builtin.stat:
+    path: /etc/ipa/default.conf
+  register: ipa_installed
+
+- name: "Run ipa-server-install (unattended, ~10–20 min)"
+  ansible.builtin.command:
+    cmd: >
+      ipa-server-install
+      --unattended
+      --realm={{ freeipa_realm }}
+      --domain={{ freeipa_domain }}
+      --ds-password={{ vault_ipa_ds_password }}
+      --admin-password={{ vault_ipa_admin_password }}
+      --hostname={{ freeipa_server_fqdn }}
+      --ip-address={{ freeipa_ip }}
+      --setup-dns
+      --auto-forwarders
+      --forwarder={{ freeipa_forwarders[0] }}
+      {% if freeipa_forwarders | length > 1 %}--forwarder={{ freeipa_forwarders[1] }}{% endif %}
+      --auto-reverse
+      --no-ntp
+  when: not ipa_installed.stat.exists
+  async: 1800     # 30 min timeout
+  poll: 30        # check every 30 seconds
+  register: ipa_install_result
+  no_log: true    # suppress sensitive output containing passwords
+
+- name: "Verify ipa-server-install completed successfully"
+  ansible.builtin.assert:
+    that:
+      - ipa_install_result is skipped or ipa_install_result.rc == 0
+    fail_msg: "ipa-server-install failed. Check /var/log/ipaserver-install.log"
+  when: not ipa_installed.stat.exists
+
+- name: "Ensure all IPA services are running"
+  ansible.builtin.systemd:
+    name: "{{ item }}"
+    state: started
+    enabled: true
+  loop:
+    - ipa
+    - named
+    - dirsrv@INTERNAL-EXAMPLE-COM
+    - krb5kdc
+    - kadmin
+    - httpd
+
+- name: "Open FreeIPA firewall ports"
+  community.general.ufw:
+    rule: allow
+    port: "{{ item.port | string }}"
+    proto: "{{ item.proto }}"
+    src: "{{ item.from }}"
+    comment: "FreeIPA"
+  loop: "{{ freeipa_firewall_ports }}"
+  tags: [firewall]

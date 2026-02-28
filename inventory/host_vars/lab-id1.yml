@@ -1,0 +1,15 @@
+---
+# inventory/host_vars/lab-id1.yml
+# Host-specific overrides for the Identity server (FreeIPA + Keycloak)
+
+ansible_host: "10.0.50.11"
+server_role:  "identity"
+server_ram_gb: 16
+
+# FreeIPA is the DNS server for the domain — point itself at loopback
+dns_nameservers:
+  - "127.0.0.1"
+  - "1.1.1.1"
+
+# Additional swap for IPA install (needs ~2 GB free)
+swap_file_size_mb: 2048

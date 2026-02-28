@@ -1,0 +1,84 @@
+---
+# ============================================================
+# Database Server Variables (lab-db1)
+# inventory/group_vars/database.yml
+# ============================================================
+
+# ── PostgreSQL ───────────────────────────────────────────────
+postgresql_version:         "16"
+postgresql_data_dir:        "/var/lib/postgresql/{{ postgresql_version }}/main"
+postgresql_config_dir:      "/etc/postgresql/{{ postgresql_version }}/main"
+postgresql_log_dir:         "/var/log/postgresql"
+postgresql_listen_addresses: "localhost,10.0.50.12"
+postgresql_max_connections: 200
+postgresql_shared_buffers:  "4GB"
+postgresql_effective_cache: "12GB"
+postgresql_work_mem:        "64MB"
+postgresql_wal_level:       "replica"
+postgresql_max_wal_senders: 3
+
+# All service databases — created idempotently
+postgresql_databases:
+  - name: keycloak
+    owner: keycloak
+  - name: nextcloud
+    owner: nextcloud
+  - name: mattermost
+    owner: mattermost
+  - name: zammad
+    owner: zammad
+  - name: suitecrm
+    owner: suitecrm
+  - name: odoo
+    owner: odoo
+  - name: openkm
+    owner: openkm
+  - name: taiga
+    owner: taiga
+  - name: snipeit
+    owner: snipeit
+  - name: glpi
+    owner: glpi
+  - name: zabbix
+    owner: zabbix
+
+# All service DB users (passwords in vault)
+postgresql_users:
+  - { name: keycloak,   db: keycloak,    vault_var: vault_pg_keycloak_pass }
+  - { name: nextcloud,  db: nextcloud,   vault_var: vault_pg_nextcloud_pass }
+  - { name: mattermost, db: mattermost,  vault_var: vault_pg_mattermost_pass }
+  - { name: zammad,     db: zammad,      vault_var: vault_pg_zammad_pass }
+  - { name: suitecrm,   db: suitecrm,    vault_var: vault_pg_suitecrm_pass }
+  - { name: odoo,       db: odoo,        vault_var: vault_pg_odoo_pass }
+  - { name: openkm,     db: openkm,      vault_var: vault_pg_openkm_pass }
+  - { name: taiga,      db: taiga,       vault_var: vault_pg_taiga_pass }
+  - { name: snipeit,    db: snipeit,     vault_var: vault_pg_snipeit_pass }
+  - { name: glpi,       db: glpi,        vault_var: vault_pg_glpi_pass }
+  - { name: zabbix,     db: zabbix,      vault_var: vault_pg_zabbix_pass }
+
+# Backup
+postgresql_backup_dir:      "/backups/postgresql"
+postgresql_backup_hour:     "4"
+postgresql_backup_minute:   "0"
+postgresql_backup_retention: 30   # days to keep daily backups
+
+postgresql_firewall_ports:
+  - { port: 5432, proto: tcp, from: "{{ it_stack_network }}" }
+
+# ── Redis ────────────────────────────────────────────────────
+redis_version:          "7"
+redis_bind:             "10.0.50.12"
+redis_port:             6379
+redis_maxmemory:        "4gb"
+redis_maxmemory_policy: "allkeys-lru"
+redis_loglevel:         "notice"
+redis_logfile:          "/var/log/redis/redis-server.log"
+redis_databases:        16
+redis_save:
+  - "900 1"
+  - "300 10"
+  - "60 10000"
+redis_appendonly:       "no"
+
+redis_firewall_ports:
+  - { port: 6379, proto: tcp, from: "{{ it_stack_network }}" }

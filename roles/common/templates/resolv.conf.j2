@@ -1,0 +1,9 @@
+# /etc/resolv.conf — managed by Ansible (roles/common)
+# {{ ansible_managed }}
+
+domain {{ it_stack_internal_domain }}
+search {{ it_stack_internal_domain }} {{ it_stack_domain }}
+
+{% for ns in dns_nameservers %}
+nameserver {{ ns }}
+{% endfor %}

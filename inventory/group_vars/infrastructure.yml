@@ -1,0 +1,47 @@
+---
+# ============================================================
+# Infrastructure Server Variables (lab-proxy1)
+# inventory/group_vars/infrastructure.yml
+# ============================================================
+
+# ── Traefik ──────────────────────────────────────────────────
+traefik_version:        "3.1.2"
+traefik_user:           "traefik"
+traefik_group:          "traefik"
+traefik_install_dir:    "/opt/traefik"
+traefik_config_dir:     "/etc/traefik"
+traefik_data_dir:       "/var/lib/traefik"
+traefik_log_dir:        "/var/log/traefik"
+traefik_acme_file:      "{{ traefik_data_dir }}/acme.json"
+
+traefik_http_port:      80
+traefik_https_port:     443
+traefik_dashboard_port: 8080
+traefik_dashboard_auth: true   # enable basic-auth on dashboard
+
+traefik_acme_email:     "admin@{{ it_stack_domain }}"
+# tls_mode: letsencrypt | internal | selfsigned
+traefik_tls_mode:       "internal"
+traefik_internal_ca_url: "https://10.0.50.11/ipa/acme/directory"
+
+# Subdomain → backend routing table
+traefik_routers:
+  - { subdomain: "cloud",    backend: "http://10.0.50.13:80",     service: nextcloud }
+  - { subdomain: "chat",     backend: "http://10.0.50.13:8065",   service: mattermost }
+  - { subdomain: "meet",     backend: "https://10.0.50.13:443",   service: jitsi }
+  - { subdomain: "mail",     backend: "https://10.0.50.14:443",   service: iredmail }
+  - { subdomain: "desk",     backend: "http://10.0.50.14:3000",   service: zammad }
+  - { subdomain: "crm",      backend: "https://10.0.50.17:443",   service: suitecrm }
+  - { subdomain: "erp",      backend: "http://10.0.50.17:8069",   service: odoo }
+  - { subdomain: "docs",     backend: "http://10.0.50.17:8080",   service: openkm }
+  - { subdomain: "pm",       backend: "https://10.0.50.18:443",   service: taiga }
+  - { subdomain: "assets",   backend: "https://10.0.50.18:443",   service: snipeit }
+  - { subdomain: "itsm",     backend: "https://10.0.50.18:443",   service: glpi }
+  - { subdomain: "monitor",  backend: "http://10.0.50.14:3000",   service: zabbix }
+  - { subdomain: "logs",     backend: "http://10.0.50.15:9000",   service: graylog }
+  - { subdomain: "id",       backend: "https://10.0.50.11:8443",  service: keycloak }
+
+traefik_firewall_ports:
+  - { port: 80,   proto: tcp, from: "0.0.0.0/0" }
+  - { port: 443,  proto: tcp, from: "0.0.0.0/0" }
+  - { port: 8080, proto: tcp, from: "{{ it_stack_network }}" }

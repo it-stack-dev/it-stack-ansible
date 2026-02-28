@@ -1,0 +1,19 @@
+# /etc/postgresql/{{ postgresql_version }}/main/pg_hba.conf
+# Managed by Ansible (roles/postgresql) — {{ ansible_managed }}
+#
+# TYPE  DATABASE        USER            ADDRESS                 METHOD
+
+# Local socket — superuser only
+local   all             postgres                                peer
+local   all             all                                     reject
+
+# Replication
+host    replication     replicator      127.0.0.1/32            scram-sha-256
+
+# All service databases — LAN access via scram-sha-256
+{% for user in postgresql_users %}
+host    {{ user.db }}   {{ user.name }}  {{ it_stack_network }}  scram-sha-256
+{% endfor %}
+
+# Deny everything else
+host    all             all             0.0.0.0/0               reject

@@ -1,0 +1,30 @@
+---
+# roles/postgresql/tasks/configure.yml
+
+- name: "Set postgres superuser password"
+  community.postgresql.postgresql_user:
+    name: postgres
+    password: "{{ vault_pg_postgres_password }}"
+    role_attr_flags: SUPERUSER
+  become_user: postgres
+  no_log: true
+
+- name: "Deploy postgresql.conf"
+  ansible.builtin.template:
+    src: postgresql.conf.j2
+    dest: "{{ postgresql_config_dir }}/postgresql.conf"
+    owner: postgres
+    group: postgres
+    mode: "0640"
+    backup: true
+  notify: restart postgresql
+
+- name: "Deploy pg_hba.conf"
+  ansible.builtin.template:
+    src: pg_hba.conf.j2
+    dest: "{{ postgresql_config_dir }}/pg_hba.conf"
+    owner: postgres
+    group: postgres
+    mode: "0640"
+    backup: true
+  notify: reload postgresql

@@ -1,0 +1,18 @@
+---
+galaxy_info:
+  role_name: common
+  author: it-stack-dev
+  description: Common base configuration for all IT-Stack Ubuntu 24.04 servers
+  license: Apache-2.0
+  min_ansible_version: "2.15"
+  platforms:
+    - name: Ubuntu
+      versions:
+        - "24.04"
+  galaxy_tags:
+    - system
+    - security
+    - firewall
+    - ntp
+
+dependencies: []

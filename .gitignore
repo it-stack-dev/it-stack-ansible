@@ -1,0 +1,59 @@
+# IT-Stack Ansible — .gitignore
+
+# ────────────────────────────────────────────
+# SECRETS — never commit these
+# ────────────────────────────────────────────
+.vault_pass
+vault/secrets.yml
+*.vault
+*.key
+*.pem
+*.p12
+*.pfx
+private_keys/
+
+# ────────────────────────────────────────────
+# Ansible runtime artifacts
+# ────────────────────────────────────────────
+*.retry
+.fact_cache/
+fact_cache/
+.cache/
+
+# ────────────────────────────────────────────
+# Ansible Galaxy collections + roles
+# (installed locally, not tracked in git)
+# ────────────────────────────────────────────
+collections/
+roles/external/
+
+# ────────────────────────────────────────────
+# Logs & temp files
+# ────────────────────────────────────────────
+*.log
+/tmp/
+
+# ────────────────────────────────────────────
+# Python
+# ────────────────────────────────────────────
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+
+# ────────────────────────────────────────────
+# Editor / OS artifacts
+# ────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+.idea/
+.vscode/
+
+# ────────────────────────────────────────────
+# Molecule (testing framework)
+# ────────────────────────────────────────────
+.molecule/

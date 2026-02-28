@@ -1,0 +1,53 @@
+---
+# playbooks/deploy-redis.yml
+# Deploy and configure Redis 7 on lab-db1.
+# Run with: make deploy-redis
+#
+# Prerequisites:
+#   - Common role applied on lab-db1
+#   - vault_redis_password defined in vault/secrets.yml
+#
+# What this does:
+#   1. Installs Redis 7 from official redis apt repo
+#   2. Configures redis.conf (bind LAN ip, maxmemory, requirepass)
+#   3. Configures logrotate
+#   4. Starts and enables redis service
+#   5. Verifies Redis responds to PING
+
+- name: "Deploy Redis Cache Server"
+  hosts: database
+  gather_facts: true
+  vars_files:
+    - ../vault/secrets.yml
+
+  pre_tasks:
+    - name: "Assert Redis password is in vault"
+      ansible.builtin.assert:
+        that:
+          - vault_redis_password is defined
+          - vault_redis_password | length >= 16
+        fail_msg: "vault_redis_password missing or too short (min 16 chars)"
+
+  roles:
+    - role: common
+      tags: [common]
+    - role: redis
+      tags: [redis]
+
+  post_tasks:
+    - name: "Verify Redis responds to AUTH + PING"
+      ansible.builtin.command:
+        cmd: "redis-cli -h {{ redis_bind }} -a {{ vault_redis_password }} PING"
+      register: redis_ping
+      changed_when: false
+      failed_when: redis_ping.stdout != "PONG"
+      tags: [verify]
+
+    - name: "Display Redis deployment summary"
+      ansible.builtin.debug:
+        msg:
+          - "Redis {{ redis_version }} deployed on {{ inventory_hostname }}"
+          - "Listening on: {{ redis_bind }}:{{ redis_port }}"
+          - "Max memory: {{ redis_maxmemory }}"
+          - "Policy: {{ redis_maxmemory_policy }}"
+      tags: [verify]

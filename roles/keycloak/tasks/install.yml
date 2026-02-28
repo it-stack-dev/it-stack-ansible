@@ -1,0 +1,94 @@
+---
+# roles/keycloak/tasks/install.yml
+
+- name: "Add Eclipse Temurin apt signing key"
+  ansible.builtin.get_url:
+    url: "https://packages.adoptium.net/artifactory/api/gpg/key/public"
+    dest: /etc/apt/keyrings/adoptium.gpg
+    mode: "0644"
+
+- name: "Add Eclipse Temurin (Java 21) apt repository"
+  ansible.builtin.apt_repository:
+    repo: >
+      deb [signed-by=/etc/apt/keyrings/adoptium.gpg]
+      https://packages.adoptium.net/artifactory/deb
+      {{ ansible_distribution_release }} main
+    filename: adoptium
+    state: present
+    update_cache: true
+
+- name: "Install Eclipse Temurin Java 21 JDK"
+  ansible.builtin.apt:
+    name: temurin-21-jdk
+    state: present
+
+- name: "Create keycloak system group"
+  ansible.builtin.group:
+    name: "{{ keycloak_group }}"
+    state: present
+    system: true
+
+- name: "Create keycloak system user"
+  ansible.builtin.user:
+    name: "{{ keycloak_user }}"
+    group: "{{ keycloak_group }}"
+    home: "{{ keycloak_install_dir }}"
+    shell: /usr/sbin/nologin
+    system: true
+    create_home: false
+
+- name: "Create required Keycloak directories"
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: "{{ keycloak_user }}"
+    group: "{{ keycloak_group }}"
+    mode: "0750"
+  loop:
+    - "{{ keycloak_install_dir }}"
+    - "{{ keycloak_data_dir }}"
+    - "{{ keycloak_log_dir }}"
+
+- name: "Check if Keycloak is already installed at correct version"
+  ansible.builtin.stat:
+    path: "{{ keycloak_install_dir }}/keycloak-{{ keycloak_version }}"
+  register: kc_dir
+
+- name: "Download Keycloak {{ keycloak_version }}"
+  ansible.builtin.get_url:
+    url: "https://github.com/keycloak/keycloak/releases/download/{{ keycloak_version }}/keycloak-{{ keycloak_version }}.tar.gz"
+    dest: "/tmp/keycloak-{{ keycloak_version }}.tar.gz"
+    mode: "0644"
+  when: not kc_dir.stat.exists
+
+- name: "Extract Keycloak archive"
+  ansible.builtin.unarchive:
+    src: "/tmp/keycloak-{{ keycloak_version }}.tar.gz"
+    dest: "{{ keycloak_install_dir }}"
+    remote_src: true
+    owner: "{{ keycloak_user }}"
+    group: "{{ keycloak_group }}"
+  when: not kc_dir.stat.exists
+
+- name: "Symlink /opt/keycloak/current → versioned install"
+  ansible.builtin.file:
+    src: "{{ keycloak_install_dir }}/keycloak-{{ keycloak_version }}"
+    dest: "{{ keycloak_install_dir }}/current"
+    state: link
+    owner: "{{ keycloak_user }}"
+    group: "{{ keycloak_group }}"
+
+- name: "Clean up downloaded archive"
+  ansible.builtin.file:
+    path: "/tmp/keycloak-{{ keycloak_version }}.tar.gz"
+    state: absent
+
+- name: "Open Keycloak firewall ports"
+  community.general.ufw:
+    rule: allow
+    port: "{{ item.port | string }}"
+    proto: "{{ item.proto }}"
+    src: "{{ item.from }}"
+    comment: "Keycloak"
+  loop: "{{ keycloak_firewall_ports }}"
+  tags: [firewall]

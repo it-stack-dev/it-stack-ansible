@@ -1,0 +1,22 @@
+---
+# roles/keycloak/meta/main.yml
+
+galaxy_info:
+  role_name: keycloak
+  author: it-stack-dev
+  description: Deploy and configure Keycloak Identity Provider with FreeIPA LDAP federation
+  license: Apache-2.0
+  min_ansible_version: "2.15"
+  platforms:
+    - name: Ubuntu
+      versions:
+        - "24.04"
+  galaxy_tags:
+    - keycloak
+    - identity
+    - sso
+    - oidc
+    - it-stack
+
+dependencies:
+  - role: common

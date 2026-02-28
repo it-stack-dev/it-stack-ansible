@@ -1,0 +1,11 @@
+---
+# inventory/host_vars/lab-proxy1.yml
+# Host-specific overrides for the Reverse Proxy server
+
+ansible_host: "10.0.50.15"
+server_role:  "infrastructure"
+server_ram_gb: 8
+
+dns_nameservers:
+  - "10.0.50.11"
+  - "1.1.1.1"

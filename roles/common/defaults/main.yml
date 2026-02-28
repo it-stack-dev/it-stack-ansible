@@ -1,0 +1,44 @@
+---
+# roles/common/defaults/main.yml
+# Sensible defaults — all overridable in group_vars or host_vars.
+
+system_timezone: "UTC"
+system_locale:   "en_US.UTF-8"
+ssh_port:        22
+ssh_permit_root_login:       "no"
+ssh_password_authentication: "no"
+ssh_pubkey_authentication:   "yes"
+ssh_max_auth_tries:         4
+ssh_client_alive_interval:  300
+ssh_client_alive_count_max: 2
+
+admin_user:   "ansible"
+admin_groups: ["sudo"]
+
+ufw_default_incoming: "deny"
+ufw_default_outgoing: "allow"
+ufw_allowed_from_lan: "10.0.50.0/24"
+
+ntp_servers:
+  - "pool.ntp.org"
+
+common_packages:
+  - curl
+  - wget
+  - git
+  - vim
+  - htop
+  - net-tools
+  - dnsutils
+  - unzip
+  - jq
+  - ca-certificates
+  - gnupg
+  - chrony
+  - ufw
+  - fail2ban
+
+firewall_extra_ports: []
+dns_nameservers:
+  - "10.0.50.11"
+  - "1.1.1.1"

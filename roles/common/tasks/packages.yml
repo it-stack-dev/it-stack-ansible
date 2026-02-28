@@ -1,0 +1,49 @@
+---
+# roles/common/tasks/packages.yml
+
+- name: "Ensure the apt cache is updated"
+  ansible.builtin.apt:
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: "Upgrade all packages to latest"
+  ansible.builtin.apt:
+    upgrade: dist
+    autoremove: true
+  register: apt_upgrade
+  notify: reboot if kernel updated
+
+- name: "Install common required packages"
+  ansible.builtin.apt:
+    name: "{{ common_packages }}"
+    state: present
+
+- name: "Set system timezone to {{ system_timezone }}"
+  community.general.timezone:
+    name: "{{ system_timezone }}"
+  notify: restart cron
+
+- name: "Set locale to {{ system_locale }}"
+  ansible.builtin.command:
+    cmd: "localectl set-locale LANG={{ system_locale }}"
+  changed_when: false
+
+- name: "Set hostname"
+  ansible.builtin.hostname:
+    name: "{{ inventory_hostname }}"
+
+- name: "Ensure /etc/hosts has correct entry for this server"
+  ansible.builtin.lineinfile:
+    path: /etc/hosts
+    regexp: "^{{ ansible_host }}\\s"
+    line: "{{ ansible_host }}  {{ inventory_hostname }}.{{ it_stack_internal_domain }}  {{ inventory_hostname }}"
+    state: present
+
+- name: "Configure DNS resolvers in /etc/resolv.conf"
+  ansible.builtin.template:
+    src: resolv.conf.j2
+    dest: /etc/resolv.conf
+    owner: root
+    group: root
+    mode: "0644"
+  when: dns_nameservers is defined

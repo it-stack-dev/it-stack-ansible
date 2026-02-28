@@ -1,0 +1,73 @@
+---
+# playbooks/deploy-postgresql.yml
+# Deploy and configure PostgreSQL 16 on lab-db1.
+# Run with: make deploy-postgresql
+#
+# Prerequisites:
+#   - Common role already applied OR run with tags: common,postgresql
+#   - FreeIPA deployed (for optional LDAP auth, not required for initial setup)
+#   - vault/secrets.yml contains all vault_pg_* passwords
+#
+# What this does:
+#   1. Applies common role (OS hardening, firewall)
+#   2. Installs PostgreSQL 16 from official apt repo
+#   3. Configures postgresql.conf (tuned for server RAM)
+#   4. Configures pg_hba.conf (LAN access via scram-sha-256)
+#   5. Creates all 11 service databases and users
+#   6. Grants appropriate privileges
+#   7. Configures daily backup cron job
+#   8. Verifies all databases are accessible
+
+- name: "Deploy PostgreSQL Database Server"
+  hosts: database
+  gather_facts: true
+  vars_files:
+    - ../vault/secrets.yml
+
+  pre_tasks:
+    - name: "Assert all DB passwords are in vault"
+      ansible.builtin.assert:
+        that:
+          - vault_pg_postgres_password is defined
+          - vault_pg_keycloak_pass is defined
+          - vault_pg_nextcloud_pass is defined
+          - vault_pg_mattermost_pass is defined
+          - vault_pg_zammad_pass is defined
+          - vault_pg_suitecrm_pass is defined
+          - vault_pg_odoo_pass is defined
+          - vault_pg_openkm_pass is defined
+          - vault_pg_taiga_pass is defined
+          - vault_pg_snipeit_pass is defined
+          - vault_pg_glpi_pass is defined
+          - vault_pg_zabbix_pass is defined
+        fail_msg: "One or more database passwords missing from vault/secrets.yml"
+
+  roles:
+    - role: common
+      tags: [common]
+    - role: postgresql
+      tags: [postgresql]
+
+  post_tasks:
+    - name: "Verify each service database exists and is accessible"
+      community.postgresql.postgresql_query:
+        db: "{{ item.name }}"
+        login_user: "{{ item.owner }}"
+        login_password: "{{ lookup('vars', item.vault_var) }}"
+        login_host: "localhost"
+        query: "SELECT 1"
+      loop: "{{ postgresql_databases | zip(postgresql_users) | list }}"
+      loop_control:
+        label: "{{ item[0].name }}"
+      ignore_errors: true
+      tags: [verify]
+
+    - name: "Display PostgreSQL deployment summary"
+      ansible.builtin.debug:
+        msg:
+          - "PostgreSQL {{ postgresql_version }} deployed on {{ inventory_hostname }}"
+          - "Listening on: {{ postgresql_listen_addresses }}:5432"
+          - "Databases created: {{ postgresql_databases | map(attribute='name') | join(', ') }}"
+          - "Backup location: {{ postgresql_backup_dir }}"
+          - "Backup schedule: daily at {{ postgresql_backup_hour }}:{{ postgresql_backup_minute }} UTC"
+      tags: [verify]

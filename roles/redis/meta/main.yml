@@ -1,0 +1,18 @@
+---
+galaxy_info:
+  role_name: redis
+  author: it-stack-dev
+  description: Deploy and configure Redis 7 cache/session store for IT-Stack services
+  license: Apache-2.0
+  min_ansible_version: "2.15"
+  platforms:
+    - name: Ubuntu
+      versions:
+        - "24.04"
+  galaxy_tags:
+    - cache
+    - redis
+    - database
+
+dependencies:
+  - role: common

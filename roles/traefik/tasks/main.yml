@@ -1,0 +1,8 @@
+---
+# roles/traefik/tasks/main.yml
+
+- name: Import install tasks
+  ansible.builtin.import_tasks: install.yml
+
+- name: Import configure tasks
+  ansible.builtin.import_tasks: configure.yml

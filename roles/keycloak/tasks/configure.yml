@@ -1,0 +1,49 @@
+---
+# roles/keycloak/tasks/configure.yml
+
+- name: "Deploy keycloak.conf"
+  ansible.builtin.template:
+    src: keycloak.conf.j2
+    dest: "{{ keycloak_install_dir }}/current/conf/keycloak.conf"
+    owner: "{{ keycloak_user }}"
+    group: "{{ keycloak_group }}"
+    mode: "0640"
+  notify: restart keycloak
+
+- name: "Build Keycloak (required when config changes)"
+  ansible.builtin.command:
+    cmd: "{{ keycloak_install_dir }}/current/bin/kc.sh build"
+  become_user: "{{ keycloak_user }}"
+  changed_when: false
+  environment:
+    JAVA_OPTS_APPEND: "{{ keycloak_java_opts }}"
+
+- name: "Deploy keycloak systemd service unit"
+  ansible.builtin.template:
+    src: keycloak.service.j2
+    dest: /etc/systemd/system/keycloak.service
+    owner: root
+    group: root
+    mode: "0644"
+  notify:
+    - reload systemd
+    - restart keycloak
+
+- name: "Force systemd daemon reload"
+  ansible.builtin.systemd:
+    daemon_reload: true
+
+- name: "Start and enable Keycloak"
+  ansible.builtin.systemd:
+    name: keycloak
+    state: started
+    enabled: true
+
+- name: "Wait for Keycloak to be ready (up to 3 minutes)"
+  ansible.builtin.uri:
+    url: "http://localhost:{{ keycloak_http_port }}/health/ready"
+    status_code: 200
+  register: kc_ready
+  retries: 18
+  delay: 10
+  until: kc_ready.status == 200

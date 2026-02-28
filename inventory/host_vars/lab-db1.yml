@@ -1,0 +1,19 @@
+---
+# inventory/host_vars/lab-db1.yml
+# Host-specific overrides for the Database server
+
+ansible_host: "10.0.50.12"
+server_role:  "database"
+server_ram_gb: 32
+
+# PostgreSQL tuning overrides for 32 GB RAM
+postgresql_shared_buffers:  "8GB"
+postgresql_effective_cache: "24GB"
+postgresql_work_mem:        "128MB"
+
+# Redis maxmemory override
+redis_maxmemory: "8gb"
+
+dns_nameservers:
+  - "10.0.50.11"
+  - "1.1.1.1"

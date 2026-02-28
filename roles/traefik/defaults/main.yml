@@ -1,0 +1,41 @@
+---
+# roles/traefik/defaults/main.yml
+
+traefik_version:       "3.1.2"
+traefik_bin_path:      "/usr/local/bin/traefik"
+traefik_config_dir:    "/etc/traefik"
+traefik_log_dir:       "/var/log/traefik"
+traefik_acme_dir:      "/etc/traefik/acme"
+traefik_user:          "traefik"
+traefik_group:         "traefik"
+
+# Ports
+traefik_http_port:       80
+traefik_https_port:      443
+traefik_dashboard_port:  8080
+
+# Dashboard auth
+traefik_dashboard_user:  "admin"
+# vault_traefik_dashboard_pass must be defined in vault/secrets.yml
+
+# TLS mode: 'internal' (FreeIPA ACME) or 'letsencrypt' or 'manual'
+traefik_tls_mode:       "internal"
+traefik_acme_email:     "admin@example.com"
+traefik_acme_ca_url:    "https://lab-id1.internal.example.com/acme/directory"
+
+# Log
+traefik_log_level:      "INFO"
+traefik_access_log:     true
+
+# Checksum for verification (update when changing version)
+# SHA256 of traefik_v3.1.2_linux_amd64.tar.gz
+traefik_checksum:       "sha256:02a1f34bb5a9ea4e7e6dff6cd3e78e3c877a5bbae2bc25a0e2e8f9c81faadaf9"
+
+traefik_firewall_ports:
+  - { port: "80",   proto: tcp, from: any,           comment: "Traefik HTTP" }
+  - { port: "443",  proto: tcp, from: any,           comment: "Traefik HTTPS" }
+  - { port: "8080", proto: tcp, from: "10.0.50.0/24", comment: "Traefik dashboard" }
+
+# Service routing table — maps subdomain → backend
+# Override in group_vars/infrastructure.yml with the full list
+traefik_routers: []

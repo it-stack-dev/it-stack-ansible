@@ -1,0 +1,12 @@
+---
+# roles/postgresql/handlers/main.yml
+
+- name: restart postgresql
+  ansible.builtin.systemd:
+    name: "postgresql@{{ postgresql_version }}-main"
+    state: restarted
+
+- name: reload postgresql
+  ansible.builtin.systemd:
+    name: "postgresql@{{ postgresql_version }}-main"
+    state: reloaded

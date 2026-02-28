@@ -1,0 +1,41 @@
+[Unit]
+Description=Keycloak SSO Identity Broker
+Documentation=https://www.keycloak.org/docs/latest/server_installation/
+After=network.target postgresql.service
+Wants=network.target
+
+[Service]
+Type=idle
+User={{ keycloak_user }}
+Group={{ keycloak_group }}
+WorkingDirectory={{ keycloak_install_dir }}/current
+
+Environment="JAVA_HOME=/usr/lib/jvm/temurin-21-jdk-amd64"
+Environment="JAVA_OPTS_APPEND={{ keycloak_java_opts }}"
+Environment="KC_HOME={{ keycloak_install_dir }}/current"
+Environment="KC_DB_PASSWORD={{ vault_keycloak_db_password }}"
+Environment="KEYCLOAK_ADMIN={{ vault_keycloak_admin_user }}"
+Environment="KEYCLOAK_ADMIN_PASSWORD={{ vault_keycloak_admin_password }}"
+
+ExecStart={{ keycloak_install_dir }}/current/bin/kc.sh start \
+  --optimized \
+  --log-level=INFO \
+  --log-console-output=json
+
+ExecReload=/bin/kill -HUP $MAINPID
+StandardOutput=append:{{ keycloak_log_dir }}/keycloak.log
+StandardError=append:{{ keycloak_log_dir }}/keycloak.log
+
+Restart=always
+RestartSec=10s
+TimeoutStartSec=180s
+TimeoutStopSec=30s
+
+# Hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths={{ keycloak_data_dir }} {{ keycloak_log_dir }} {{ keycloak_install_dir }}/current/data
+
+[Install]
+WantedBy=multi-user.target

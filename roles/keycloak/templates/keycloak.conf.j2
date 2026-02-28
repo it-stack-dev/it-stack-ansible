@@ -1,0 +1,31 @@
+# /opt/keycloak/current/conf/keycloak.conf
+# Managed by Ansible (roles/keycloak) — {{ ansible_managed }}
+
+# ── Database ─────────────────────────────────────────────────
+db=postgres
+db-url=jdbc:postgresql://{{ keycloak_db_host }}:{{ keycloak_db_port }}/{{ keycloak_db_name }}
+db-username={{ keycloak_db_user }}
+db-password={{ vault_keycloak_db_password }}
+
+# ── HTTP ─────────────────────────────────────────────────────
+http-enabled=true
+http-host={{ keycloak_bind_address }}
+http-port={{ keycloak_http_port }}
+https-port={{ keycloak_https_port }}
+
+# ── Hostname ─────────────────────────────────────────────────
+hostname=id.{{ it_stack_domain }}
+hostname-backchannel-dynamic=true
+
+# ── Features ─────────────────────────────────────────────────
+features=admin-fine-grained-authz,token-exchange
+
+# ── Health & Metrics ─────────────────────────────────────────
+health-enabled=true
+metrics-enabled=true
+
+# ── Proxy ────────────────────────────────────────────────────
+proxy-headers=xforwarded
+
+# ── Cache ────────────────────────────────────────────────────
+cache=local

@@ -1,0 +1,59 @@
+---
+# roles/postgresql/tasks/install.yml
+
+- name: "Install required apt dependencies for PostgreSQL repo"
+  ansible.builtin.apt:
+    name:
+      - curl
+      - gnupg
+      - lsb-release
+    state: present
+
+- name: "Add PostgreSQL apt signing key"
+  ansible.builtin.apt_key:
+    url: "https://www.postgresql.org/media/keys/ACCC4CF8.asc"
+    state: present
+    keyring: /etc/apt/keyrings/postgresql.gpg
+
+- name: "Add PostgreSQL apt repository"
+  ansible.builtin.apt_repository:
+    repo: >
+      deb [signed-by=/etc/apt/keyrings/postgresql.gpg]
+      https://apt.postgresql.org/pub/repos/apt
+      {{ ansible_distribution_release }}-pgdg main
+    filename: postgresql
+    state: present
+    update_cache: true
+
+- name: "Install PostgreSQL {{ postgresql_version }}"
+  ansible.builtin.apt:
+    name:
+      - "postgresql-{{ postgresql_version }}"
+      - "postgresql-client-{{ postgresql_version }}"
+      - "postgresql-{{ postgresql_version }}-pgaudit"
+      - python3-psycopg2
+    state: present
+
+- name: "Ensure PostgreSQL service is started and enabled"
+  ansible.builtin.systemd:
+    name: "postgresql@{{ postgresql_version }}-main"
+    state: started
+    enabled: true
+
+- name: "Create backup directory"
+  ansible.builtin.file:
+    path: "{{ postgresql_backup_dir }}"
+    state: directory
+    owner: postgres
+    group: postgres
+    mode: "0750"
+
+- name: "Open PostgreSQL firewall port"
+  community.general.ufw:
+    rule: allow
+    port: "5432"
+    proto: tcp
+    src: "{{ item.from }}"
+    comment: "PostgreSQL"
+  loop: "{{ postgresql_firewall_ports }}"
+  tags: [firewall]

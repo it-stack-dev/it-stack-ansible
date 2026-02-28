@@ -1,0 +1,53 @@
+---
+# roles/postgresql/tasks/databases.yml
+# Create all service databases and users idempotently.
+
+- name: "Create service database users"
+  community.postgresql.postgresql_user:
+    name: "{{ item.name }}"
+    password: "{{ lookup('vars', item.vault_var) }}"
+    role_attr_flags: "NOSUPERUSER,NOCREATEDB,NOCREATEROLE"
+    state: present
+  become_user: postgres
+  loop: "{{ postgresql_users }}"
+  loop_control:
+    label: "{{ item.name }}"
+  no_log: true
+
+- name: "Create service databases"
+  community.postgresql.postgresql_db:
+    name: "{{ item.name }}"
+    owner: "{{ item.owner }}"
+    encoding: UTF8
+    lc_collate: "en_US.UTF-8"
+    lc_ctype: "en_US.UTF-8"
+    template: template0
+    state: present
+  become_user: postgres
+  loop: "{{ postgresql_databases }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+- name: "Grant all privileges on databases to their owners"
+  community.postgresql.postgresql_privs:
+    db: "{{ item.name }}"
+    privs: ALL
+    type: database
+    role: "{{ item.owner }}"
+    state: present
+  become_user: postgres
+  loop: "{{ postgresql_databases }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+- name: "Revoke PUBLIC CREATE on databases"
+  community.postgresql.postgresql_privs:
+    db: "{{ item.name }}"
+    privs: CREATE
+    type: database
+    role: PUBLIC
+    state: absent
+  become_user: postgres
+  loop: "{{ postgresql_databases }}"
+  loop_control:
+    label: "{{ item.name }}"

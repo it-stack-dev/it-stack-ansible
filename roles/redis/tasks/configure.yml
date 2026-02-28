@@ -1,0 +1,55 @@
+---
+# roles/redis/tasks/configure.yml
+
+- name: "Deploy redis.conf"
+  ansible.builtin.template:
+    src: redis.conf.j2
+    dest: /etc/redis/redis.conf
+    owner: redis
+    group: redis
+    mode: "0640"
+    backup: true
+  notify: restart redis
+
+- name: "Configure Redis logrotate"
+  ansible.builtin.copy:
+    dest: /etc/logrotate.d/redis-server
+    content: |
+      /var/log/redis/redis-server.log {
+          weekly
+          rotate 12
+          compress
+          missingok
+          notifempty
+          copytruncate
+      }
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: "Disable transparent huge pages (Redis recommendation)"
+  ansible.builtin.shell: |
+    echo never > /sys/kernel/mm/transparent_hugepage/enabled 2>/dev/null || true
+    echo never > /sys/kernel/mm/transparent_hugepage/defrag  2>/dev/null || true
+  changed_when: false
+
+- name: "Persist THP disable across reboots via rc.local"
+  ansible.builtin.lineinfile:
+    path: /etc/rc.local
+    line: "echo never > /sys/kernel/mm/transparent_hugepage/enabled"
+    create: true
+    mode: "0755"
+
+- name: "Configure kernel overcommit for Redis AOF"
+  ansible.posix.sysctl:
+    name: vm.overcommit_memory
+    value: "1"
+    state: present
+    sysctl_set: true
+    reload: true
+
+- name: "Ensure Redis is started and enabled"
+  ansible.builtin.systemd:
+    name: redis-server
+    state: started
+    enabled: true

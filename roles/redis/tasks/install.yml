@@ -1,0 +1,41 @@
+---
+# roles/redis/tasks/install.yml
+
+- name: "Add Redis official apt signing key"
+  ansible.builtin.get_url:
+    url: "https://packages.redis.io/gpg"
+    dest: /etc/apt/keyrings/redis-archive-keyring.gpg
+    mode: "0644"
+
+- name: "Add Redis {{ redis_version }} apt repository"
+  ansible.builtin.apt_repository:
+    repo: >
+      deb [signed-by=/etc/apt/keyrings/redis-archive-keyring.gpg]
+      https://packages.redis.io/deb
+      {{ ansible_distribution_release }} main
+    filename: redis
+    state: present
+    update_cache: true
+
+- name: "Install redis-server"
+  ansible.builtin.apt:
+    name: redis-server
+    state: present
+
+- name: "Ensure Redis log directory exists"
+  ansible.builtin.file:
+    path: /var/log/redis
+    state: directory
+    owner: redis
+    group: redis
+    mode: "0755"
+
+- name: "Open Redis firewall port"
+  community.general.ufw:
+    rule: allow
+    port: "{{ redis_port | string }}"
+    proto: tcp
+    src: "{{ item.from }}"
+    comment: "Redis"
+  loop: "{{ redis_firewall_ports }}"
+  tags: [firewall]

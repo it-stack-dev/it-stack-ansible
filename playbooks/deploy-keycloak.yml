@@ -1,0 +1,81 @@
+---
+# playbooks/deploy-keycloak.yml
+# Deploy and configure Keycloak on lab-id1.
+# Run with: make deploy-keycloak
+#
+# Prerequisites:
+#   - FreeIPA RUNNING on lab-id1 (ipa-server-install complete)
+#   - PostgreSQL RUNNING on lab-db1 with keycloak database created
+#   - vault/secrets.yml contains vault_keycloak_* and vault_pg_keycloak_pass
+#
+# What this does:
+#   1. Installs Java 21 (Eclipse Temurin)
+#   2. Creates keycloak system user/group
+#   3. Downloads and installs Keycloak {{ keycloak_version }}
+#   4. Configures keycloak.conf (DB, hostname, ports)
+#   5. Creates systemd service, starts and enables
+#   6. Waits for Keycloak to be healthy
+#   7. Creates it-stack realm via kcadm.sh
+#   8. Configures FreeIPA LDAP user federation
+#   9. Creates all OIDC/SAML clients for Phase 1+ services
+
+- name: "Deploy Keycloak SSO Broker"
+  hosts: identity
+  gather_facts: true
+  vars_files:
+    - ../vault/secrets.yml
+
+  pre_tasks:
+    - name: "Assert required vault variables are defined"
+      ansible.builtin.assert:
+        that:
+          - vault_keycloak_admin_password is defined
+          - vault_keycloak_db_password is defined
+          - vault_keycloak_ldap_bind_pass is defined
+        fail_msg: "Required Keycloak vault variables missing"
+
+    - name: "Verify PostgreSQL keycloak DB is reachable"
+      ansible.builtin.wait_for:
+        host: "{{ keycloak_db_host }}"
+        port: "{{ keycloak_db_port }}"
+        timeout: 30
+      register: pg_check
+
+  roles:
+    - role: common
+      tags: [common]
+    - role: keycloak
+      tags: [keycloak]
+
+  post_tasks:
+    - name: "Wait for Keycloak health endpoint"
+      ansible.builtin.uri:
+        url: "http://localhost:{{ keycloak_http_port }}/health/ready"
+        status_code: 200
+      register: kc_health
+      retries: 15
+      delay: 10
+      until: kc_health.status == 200
+      tags: [verify]
+
+    - name: "Verify it-stack realm exists"
+      ansible.builtin.command:
+        cmd: >
+          /opt/keycloak/bin/kcadm.sh get realms/{{ keycloak_realm }}
+          --server http://localhost:{{ keycloak_http_port }}
+          --realm master
+          --user {{ vault_keycloak_admin_user }}
+          --password {{ vault_keycloak_admin_password }}
+      register: realm_check
+      changed_when: false
+      tags: [verify]
+
+    - name: "Display Keycloak deployment summary"
+      ansible.builtin.debug:
+        msg:
+          - "Keycloak {{ keycloak_version }} deployed on {{ inventory_hostname }}"
+          - "Admin console: http://{{ ansible_host }}:{{ keycloak_http_port }}/admin/"
+          - "Health:        http://{{ ansible_host }}:{{ keycloak_http_port }}/health"
+          - "Realm:         {{ keycloak_realm }}"
+          - "LDAP federated to: {{ keycloak_ldap_url }}"
+      tags: [verify]

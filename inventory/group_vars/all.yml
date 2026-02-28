@@ -1,0 +1,73 @@
+---
+# ============================================================
+# IT-Stack Global Variables
+# inventory/group_vars/all.yml
+# ============================================================
+
+# ── Network ──────────────────────────────────────────────────
+it_stack_domain:        "example.com"
+it_stack_internal_domain: "internal.example.com"
+it_stack_network:       "10.0.50.0/24"
+it_stack_gateway:       "10.0.50.1"
+it_stack_dns_server:    "10.0.50.11"   # FreeIPA is the DNS server
+
+# ── Server IPs ───────────────────────────────────────────────
+servers:
+  id1:     { hostname: "lab-id1",    ip: "10.0.50.11", role: "identity" }
+  db1:     { hostname: "lab-db1",    ip: "10.0.50.12", role: "database" }
+  app1:    { hostname: "lab-app1",   ip: "10.0.50.13", role: "collaboration" }
+  comm1:   { hostname: "lab-comm1",  ip: "10.0.50.14", role: "communications" }
+  proxy1:  { hostname: "lab-proxy1", ip: "10.0.50.15", role: "infrastructure" }
+  pbx1:    { hostname: "lab-pbx1",   ip: "10.0.50.16", role: "voip" }
+  biz1:    { hostname: "lab-biz1",   ip: "10.0.50.17", role: "business" }
+  mgmt1:   { hostname: "lab-mgmt1",  ip: "10.0.50.18", role: "it-management" }
+
+# ── System ───────────────────────────────────────────────────
+system_timezone:        "UTC"
+system_locale:          "en_US.UTF-8"
+ntp_servers:
+  - "pool.ntp.org"
+  - "time.cloudflare.com"
+
+common_packages:
+  - curl
+  - wget
+  - git
+  - vim
+  - htop
+  - iotop
+  - net-tools
+  - dnsutils
+  - tcpdump
+  - unzip
+  - jq
+  - python3-pip
+  - python3-venv
+  - ca-certificates
+  - gnupg
+  - apt-transport-https
+  - software-properties-common
+  - chrony
+  - ufw
+  - fail2ban
+  - logrotate
+
+# ── SSH Hardening ────────────────────────────────────────────
+ssh_permit_root_login:         "no"
+ssh_password_authentication:   "no"
+ssh_pubkey_authentication:     "yes"
+ssh_allowed_groups:            "sudo ansible"
+ssh_port:                      22
+
+# ── Firewall ─────────────────────────────────────────────────
+ufw_default_incoming:  "deny"
+ufw_default_outgoing:  "allow"
+ufw_allowed_from_lan:  "10.0.50.0/24"
+
+# ── Admin user ───────────────────────────────────────────────
+admin_user:   "ansible"
+admin_groups: ["sudo"]
+
+# ── Ansible Vault references ─────────────────────────────────
+# Real values encrypted in vault/secrets.yml
+# Reference as: "{{ vault_admin_password }}" etc.

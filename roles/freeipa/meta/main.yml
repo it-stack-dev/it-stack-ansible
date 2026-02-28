@@ -1,0 +1,20 @@
+---
+galaxy_info:
+  role_name: freeipa
+  author: it-stack-dev
+  description: Deploy and configure FreeIPA identity server (LDAP + Kerberos + DNS + PKI)
+  license: Apache-2.0
+  min_ansible_version: "2.15"
+  platforms:
+    - name: Ubuntu
+      versions:
+        - "24.04"
+  galaxy_tags:
+    - ldap
+    - kerberos
+    - identity
+    - dns
+    - freeipa
+
+dependencies:
+  - role: common

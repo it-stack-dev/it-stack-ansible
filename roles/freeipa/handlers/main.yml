@@ -1,0 +1,7 @@
+---
+# roles/freeipa/handlers/main.yml
+
+- name: restart ipa
+  ansible.builtin.command:
+    cmd: ipactl restart
+  changed_when: false

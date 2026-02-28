@@ -1,0 +1,35 @@
+#!/usr/bin/env bash
+# /usr/local/bin/pg_backup.sh — Managed by Ansible (roles/postgresql)
+# {{ ansible_managed }}
+#
+# Daily PostgreSQL backup for IT-Stack.
+# Creates one compressed dump per database, plus a full pg_dumpall.
+# Retains {{ postgresql_backup_retention }} daily backups.
+
+set -euo pipefail
+
+BACKUP_DIR="{{ postgresql_backup_dir }}"
+DATE=$(date +%Y-%m-%d)
+LOG_PREFIX="[$(date '+%Y-%m-%d %H:%M:%S')]"
+RETENTION={{ postgresql_backup_retention }}
+
+echo "${LOG_PREFIX} Starting IT-Stack PostgreSQL backup"
+mkdir -p "${BACKUP_DIR}/daily/${DATE}"
+
+# Full cluster dump
+echo "${LOG_PREFIX} Running pg_dumpall..."
+pg_dumpall | gzip -9 > "${BACKUP_DIR}/daily/${DATE}/all-databases.sql.gz"
+echo "${LOG_PREFIX} pg_dumpall complete: $(du -sh ${BACKUP_DIR}/daily/${DATE}/all-databases.sql.gz | cut -f1)"
+
+# Per-database dumps for faster selective restores
+{% for db in postgresql_databases %}
+echo "${LOG_PREFIX} Dumping database: {{ db.name }}"
+pg_dump --format=custom --compress=9 {{ db.name }} \
+  > "${BACKUP_DIR}/daily/${DATE}/{{ db.name }}.dump"
+{% endfor %}
+
+# Rotate old backups
+echo "${LOG_PREFIX} Rotating backups older than ${RETENTION} days..."
+find "${BACKUP_DIR}/daily" -maxdepth 1 -type d -mtime +${RETENTION} -exec rm -rf {} +
+
+echo "${LOG_PREFIX} Backup complete. Size: $(du -sh ${BACKUP_DIR}/daily/${DATE} | cut -f1)"

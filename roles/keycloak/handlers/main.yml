@@ -1,0 +1,11 @@
+---
+# roles/keycloak/handlers/main.yml
+
+- name: restart keycloak
+  ansible.builtin.systemd:
+    name: keycloak
+    state: restarted
+
+- name: reload systemd
+  ansible.builtin.systemd:
+    daemon_reload: true

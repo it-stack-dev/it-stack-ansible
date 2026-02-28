@@ -1,0 +1,73 @@
+---
+# playbooks/deploy-freeipa.yml
+# Deploy and configure FreeIPA on lab-id1.
+# Run with: make deploy-freeipa
+#
+# Prerequisites:
+#   - Ubuntu 24.04 on lab-id1 with SSH access for ansible user
+#   - vault/secrets.yml contains vault_ipa_admin_password, vault_ipa_ds_password
+#   - lab-id1 reachable at 10.0.50.11
+#
+# What this does:
+#   1. Applies common role (OS hardening, packages, NTP, firewall)
+#   2. Installs freeipa-server packages
+#   3. Runs ipa-server-install (unattended)
+#   4. Configures DNS forwarders
+#   5. Creates base OUs and groups
+#   6. Creates service accounts used by Keycloak and other services
+#   7. Configures HBAC rules
+#   8. Verifies IPA services are running
+
+- name: "Deploy FreeIPA Identity Server"
+  hosts: identity
+  gather_facts: true
+  vars_files:
+    - ../vault/secrets.yml
+
+  pre_tasks:
+    - name: "Assert required vault variables are defined"
+      ansible.builtin.assert:
+        that:
+          - vault_ipa_admin_password is defined
+          - vault_ipa_ds_password is defined
+        fail_msg: "Required vault variables are missing. Check vault/secrets.yml"
+
+    - name: "Verify target is on expected subnet"
+      ansible.builtin.assert:
+        that:
+          - ansible_host is match('10\.0\.50\.\d+')
+        fail_msg: "Target host {{ ansible_host }} is not on the expected 10.0.50.0/24 subnet"
+
+  roles:
+    - role: common
+      tags: [common]
+    - role: freeipa
+      tags: [freeipa]
+
+  post_tasks:
+    - name: "Verify FreeIPA API is responding"
+      ansible.builtin.uri:
+        url: "https://{{ ansible_host }}/ipa/json"
+        method: POST
+        body_format: json
+        body:
+          method: ping
+          params: [[], {}]
+        validate_certs: false
+        status_code: 200
+      register: ipa_ping
+      retries: 5
+      delay: 10
+      until: ipa_ping.status == 200
+      tags: [verify]
+
+    - name: "Display FreeIPA deployment summary"
+      ansible.builtin.debug:
+        msg:
+          - "FreeIPA deployed successfully on {{ inventory_hostname }}"
+          - "Web UI:      https://{{ ansible_host }}/ipa/ui/"
+          - "LDAP:        ldap://{{ ansible_host }}:389"
+          - "LDAPS:       ldaps://{{ ansible_host }}:636"
+          - "Kerberos:    {{ freeipa_realm }}"
+          - "Admin login: admin / <vault_ipa_admin_password>"
+      tags: [verify]

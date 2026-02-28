@@ -1,0 +1,55 @@
+# /etc/postgresql/{{ postgresql_version }}/main/postgresql.conf
+# Managed by Ansible (roles/postgresql) — {{ ansible_managed }}
+
+# ── Connection settings ──────────────────────────────────────
+listen_addresses = '{{ postgresql_listen_addresses }}'
+port = 5432
+max_connections = {{ postgresql_max_connections }}
+
+# ── Memory (tuned for {{ ansible_memtotal_mb | default(16384) }} MB RAM) ─────
+shared_buffers = {{ postgresql_shared_buffers }}
+effective_cache_size = {{ postgresql_effective_cache }}
+work_mem = {{ postgresql_work_mem }}
+maintenance_work_mem = 512MB
+wal_buffers = 64MB
+dynamic_shared_memory_type = posix
+
+# ── Checkpoints ──────────────────────────────────────────────
+checkpoint_completion_target = 0.9
+wal_level = {{ postgresql_wal_level }}
+max_wal_size = 4GB
+min_wal_size = 1GB
+
+# ── Replication ──────────────────────────────────────────────
+max_wal_senders = {{ postgresql_max_wal_senders }}
+wal_keep_size = 1GB
+
+# ── Query planner ────────────────────────────────────────────
+random_page_cost = 1.1
+seq_page_cost = 1.0
+default_statistics_target = 100
+
+# ── Logging ──────────────────────────────────────────────────
+logging_collector = on
+log_directory = 'pg_log'
+log_filename = 'postgresql-%Y-%m-%d_%H%M%S.log'
+log_rotation_age = 1d
+log_rotation_size = 100MB
+log_truncate_on_rotation = on
+log_min_duration_statement = 1000   # log queries taking > 1 second
+log_line_prefix = '%t [%p]: [%l-1] user=%u,db=%d,app=%a,client=%h '
+log_checkpoints = on
+log_connections = on
+log_disconnections = on
+log_lock_waits = on
+log_temp_files = 0
+log_autovacuum_min_duration = 0
+
+# ── Locale ────────────────────────────────────────────────────
+datestyle = 'iso, mdy'
+timezone = 'UTC'
+lc_messages = 'en_US.UTF-8'
+lc_monetary = 'en_US.UTF-8'
+lc_numeric = 'en_US.UTF-8'
+lc_time = 'en_US.UTF-8'
+default_text_search_config = 'pg_catalog.english'

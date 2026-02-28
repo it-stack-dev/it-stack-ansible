@@ -1,0 +1,18 @@
+---
+# roles/postgresql/tasks/main.yml
+
+- name: "Import PostgreSQL installation tasks"
+  ansible.builtin.import_tasks: install.yml
+  tags: [postgresql, install]
+
+- name: "Import PostgreSQL configuration tasks"
+  ansible.builtin.import_tasks: configure.yml
+  tags: [postgresql, configure]
+
+- name: "Import database and user creation tasks"
+  ansible.builtin.import_tasks: databases.yml
+  tags: [postgresql, databases]
+
+- name: "Import backup configuration tasks"
+  ansible.builtin.import_tasks: backup.yml
+  tags: [postgresql, backup]

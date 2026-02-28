@@ -1,0 +1,29 @@
+---
+# roles/freeipa/defaults/main.yml
+
+freeipa_domain:       "internal.example.com"
+freeipa_realm:        "INTERNAL.EXAMPLE.COM"
+freeipa_server_fqdn:  "lab-id1.internal.example.com"
+freeipa_ip:           "10.0.50.11"
+freeipa_forwarders:
+  - "1.1.1.1"
+  - "8.8.8.8"
+freeipa_setup_dns:    true
+freeipa_no_ntp:       true
+
+freeipa_groups:
+  - { name: "it-admins",        desc: "IT Administrators" }
+  - { name: "it-users",         desc: "IT Stack Users" }
+  - { name: "service-accounts", desc: "Service Account principals" }
+
+freeipa_service_accounts: []
+
+freeipa_firewall_ports:
+  - { port: 80,  proto: tcp, from: "10.0.50.0/24" }
+  - { port: 443, proto: tcp, from: "10.0.50.0/24" }
+  - { port: 389, proto: tcp, from: "10.0.50.0/24" }
+  - { port: 636, proto: tcp, from: "10.0.50.0/24" }
+  - { port: 88,  proto: tcp, from: "10.0.50.0/24" }
+  - { port: 88,  proto: udp, from: "10.0.50.0/24" }
+  - { port: 53,  proto: udp, from: "10.0.50.0/24" }
+  - { port: 53,  proto: tcp, from: "10.0.50.0/24" }
