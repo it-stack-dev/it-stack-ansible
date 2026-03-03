@@ -12,3 +12,8 @@
 - name: "Import realm and client setup tasks"
   ansible.builtin.import_tasks: realm.yml
   tags: [keycloak, realm]
+
+- name: "Import FreeIPA LDAP federation tasks"
+  ansible.builtin.import_tasks: ldap-federation.yml
+  tags: [keycloak, integration, ldap-federation]
+  when: keycloak_enable_ldap_federation | default(true) | bool

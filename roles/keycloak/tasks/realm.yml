@@ -44,40 +44,10 @@
   when: realm_exists.rc != 0
   become_user: "{{ keycloak_user }}"
 
-- name: "Configure FreeIPA LDAP user federation"
-  ansible.builtin.template:
-    src: ldap-federation.json.j2
-    dest: /tmp/ldap-federation.json
-    owner: "{{ keycloak_user }}"
-    mode: "0600"
-  no_log: true
-
-- name: "Check if LDAP federation already exists"
-  ansible.builtin.command:
-    cmd: >
-      {{ kcadm }} get components
-      --server {{ kc_server }}
-      -r {{ keycloak_realm }}
-      --query "providerType=org.keycloak.storage.UserStorageProvider"
-  register: ldap_exists
-  changed_when: false
-  become_user: "{{ keycloak_user }}"
-
-- name: "Create LDAP federation (FreeIPA)"
-  ansible.builtin.command:
-    cmd: >
-      {{ kcadm }} create components
-      --server {{ kc_server }}
-      -r {{ keycloak_realm }}
-      -f /tmp/ldap-federation.json
-  when: "'freeipa-ldap' not in ldap_exists.stdout"
-  become_user: "{{ keycloak_user }}"
-  no_log: true
-
-- name: "Remove LDAP federation temp file"
-  ansible.builtin.file:
-    path: /tmp/ldap-federation.json
-    state: absent
+# NOTE: FreeIPA LDAP federation, group mapper, attribute mappers, sync, and
+# role assignment are handled by ldap-federation.yml (imported via main.yml).
+# Keeping federation out of this file avoids running it on every realm-only
+# re-run unless the 'integration' tag is explicitly passed.
 
 - name: "Create OIDC clients for Phase 1+ services"
   ansible.builtin.command:

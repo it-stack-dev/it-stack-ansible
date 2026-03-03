@@ -1,0 +1,309 @@
+---
+# roles/keycloak/tasks/ldap-federation.yml
+# Configure FreeIPA LDAP user federation in the Keycloak it-stack realm.
+# Idempotent: skips creation if the federation component already exists.
+#
+# Requires:
+#   - Keycloak running and reachable at kc_server
+#   - roles/freeipa/tasks/keycloak-svc-account.yml already applied (or manual setup)
+#   - Vault vars: vault_keycloak_admin_password, vault_keycloak_ldap_bind_pass
+#   - Template: roles/keycloak/templates/ldap-federation.json.j2
+#   - Template: roles/keycloak/templates/group-mapper.json.j2
+
+- name: "Set common kcadm facts"
+  ansible.builtin.set_fact:
+    kcadm:    "{{ keycloak_install_dir }}/current/bin/kcadm.sh"
+    kc_server: "http://localhost:{{ keycloak_http_port }}"
+  tags: [keycloak, integration, ldap-federation]
+
+# ── Step 1: Admin auth ───────────────────────────────────────────────────────
+
+- name: "Authenticate kcadm"
+  ansible.builtin.command:
+    cmd: >
+      {{ kcadm }} config credentials
+      --server {{ kc_server }}
+      --realm master
+      --user {{ vault_keycloak_admin_user }}
+      --password {{ vault_keycloak_admin_password }}
+  changed_when: false
+  no_log: true
+  become_user: "{{ keycloak_user }}"
+  tags: [keycloak, integration, ldap-federation]
+
+# ── Step 2: Ensure realm exists ──────────────────────────────────────────────
+
+- name: "Check realm {{ keycloak_realm }} exists"
+  ansible.builtin.command:
+    cmd: "{{ kcadm }} get realms/{{ keycloak_realm }}"
+  register: realm_check
+  changed_when: false
+  failed_when: false
+  become_user: "{{ keycloak_user }}"
+  tags: [keycloak, integration, ldap-federation]
+
+- name: "Fail if realm {{ keycloak_realm }} does not exist"
+  ansible.builtin.fail:
+    msg: >
+      Realm '{{ keycloak_realm }}' not found in Keycloak.
+      Run the realm.yml task first or include tag 'keycloak,realm'.
+  when: realm_check.rc != 0
+  tags: [keycloak, integration, ldap-federation]
+
+# ── Step 3: Create federation component ─────────────────────────────────────
+
+- name: "Check existing LDAP federation components"
+  ansible.builtin.command:
+    cmd: >
+      {{ kcadm }} get components
+      --server {{ kc_server }}
+      -r {{ keycloak_realm }}
+      --query "providerType=org.keycloak.storage.UserStorageProvider"
+  register: ldap_components
+  changed_when: false
+  become_user: "{{ keycloak_user }}"
+  tags: [keycloak, integration, ldap-federation]
+
+- name: "Render LDAP federation JSON payload"
+  ansible.builtin.template:
+    src: ldap-federation.json.j2
+    dest: /tmp/kc-ldap-federation.json
+    owner: "{{ keycloak_user }}"
+    mode: "0600"
+  no_log: true
+  tags: [keycloak, integration, ldap-federation]
+
+- name: "Create FreeIPA LDAP federation component"
+  ansible.builtin.command:
+    cmd: >
+      {{ kcadm }} create components
+      --server {{ kc_server }}
+      -r {{ keycloak_realm }}
+      -f /tmp/kc-ldap-federation.json
+  when: "'freeipa-ldap' not in ldap_components.stdout"
+  register: ldap_create
+  become_user: "{{ keycloak_user }}"
+  no_log: true
+  tags: [keycloak, integration, ldap-federation]
+
+- name: "Remove LDAP federation JSON temp file"
+  ansible.builtin.file:
+    path: /tmp/kc-ldap-federation.json
+    state: absent
+  tags: [keycloak, integration, ldap-federation]
+
+# ── Step 4: Retrieve federation component ID ─────────────────────────────────
+
+- name: "Get federation component ID"
+  ansible.builtin.shell:
+    cmd: >
+      {{ kcadm }} get components
+      --server {{ kc_server }}
+      -r {{ keycloak_realm }}
+      --query "providerType=org.keycloak.storage.UserStorageProvider"
+      --fields id,name
+      2>/dev/null
+      | python3 -c "
+      import sys, json
+      comps = json.load(sys.stdin)
+      for c in comps:
+          if c.get('name') == 'freeipa-ldap':
+              print(c['id'])
+      "
+  register: ldap_component_id
+  changed_when: false
+  become_user: "{{ keycloak_user }}"
+  tags: [keycloak, integration, ldap-federation]
+
+- name: "Fail if federation component ID not found"
+  ansible.builtin.fail:
+    msg: "Could not retrieve freeipa-ldap federation component ID -- creation may have failed"
+  when: ldap_component_id.stdout | trim == ""
+  tags: [keycloak, integration, ldap-federation]
+
+- name: "Set federation_id fact"
+  ansible.builtin.set_fact:
+    federation_id: "{{ ldap_component_id.stdout | trim }}"
+  tags: [keycloak, integration, ldap-federation]
+
+# ── Step 5: Group mapper ─────────────────────────────────────────────────────
+
+- name: "Check existing mappers for federation component"
+  ansible.builtin.command:
+    cmd: >
+      {{ kcadm }} get components
+      --server {{ kc_server }}
+      -r {{ keycloak_realm }}
+      --query "parent={{ federation_id }}"
+      --fields name,providerId
+  register: existing_mappers
+  changed_when: false
+  become_user: "{{ keycloak_user }}"
+  tags: [keycloak, integration, ldap-federation]
+
+- name: "Render group mapper JSON"
+  ansible.builtin.template:
+    src: group-mapper.json.j2
+    dest: /tmp/kc-group-mapper.json
+    owner: "{{ keycloak_user }}"
+    mode: "0600"
+  tags: [keycloak, integration, ldap-federation]
+
+- name: "Create LDAP group mapper"
+  ansible.builtin.command:
+    cmd: >
+      {{ kcadm }} create components
+      --server {{ kc_server }}
+      -r {{ keycloak_realm }}
+      -f /tmp/kc-group-mapper.json
+  when: "'group-ldap-mapper' not in existing_mappers.stdout"
+  become_user: "{{ keycloak_user }}"
+  tags: [keycloak, integration, ldap-federation]
+
+- name: "Remove group mapper JSON temp file"
+  ansible.builtin.file:
+    path: /tmp/kc-group-mapper.json
+    state: absent
+  tags: [keycloak, integration, ldap-federation]
+
+# ── Step 6: Attribute mappers ────────────────────────────────────────────────
+
+- name: "Create attribute mappers for FreeIPA fields"
+  ansible.builtin.command:
+    cmd: >
+      {{ kcadm }} create components
+      --server {{ kc_server }}
+      -r {{ keycloak_realm }}
+      -s name="{{ item.name }}"
+      -s providerId="{{ item.provider }}"
+      -s providerType="org.keycloak.storage.ldap.mappers.LDAPStorageMapper"
+      -s parentId="{{ federation_id }}"
+      -s "config.user.model.attribute=[\"{{ item.kc_attr }}\"]"
+      -s "config.ldap.attribute=[\"{{ item.ldap_attr }}\"]"
+      -s "config.read.only=[\"true\"]"
+      -s "config.always.read.value.from.ldap=[\"false\"]"
+      -s "config.is.mandatory.in.ldap=[\"false\"]"
+  when: "item.name not in existing_mappers.stdout"
+  become_user: "{{ keycloak_user }}"
+  loop:
+    - { name: "email",      provider: "user-attribute-ldap-mapper", kc_attr: "email",     ldap_attr: "mail" }
+    - { name: "first-name", provider: "user-attribute-ldap-mapper", kc_attr: "firstName", ldap_attr: "givenName" }
+    - { name: "last-name",  provider: "user-attribute-ldap-mapper", kc_attr: "lastName",  ldap_attr: "sn" }
+    - { name: "phone",      provider: "user-attribute-ldap-mapper", kc_attr: "phoneNumber", ldap_attr: "telephoneNumber" }
+    - { name: "title",      provider: "user-attribute-ldap-mapper", kc_attr: "jobTitle",  ldap_attr: "title" }
+  loop_control:
+    label: "{{ item.name }}"
+  tags: [keycloak, integration, ldap-federation]
+
+# ── Step 7: Map admins group → realm-admin role ──────────────────────────────
+
+- name: "Get 'admins' group ID from Keycloak"
+  ansible.builtin.shell:
+    cmd: >
+      {{ kcadm }} get groups
+      --server {{ kc_server }}
+      -r {{ keycloak_realm }}
+      --query "search=admins" --fields id,name
+      2>/dev/null
+      | python3 -c "
+      import sys, json
+      groups = json.load(sys.stdin)
+      for g in groups:
+          if g.get('name') == 'admins':
+              print(g['id'])
+      "
+  register: admins_group_id
+  changed_when: false
+  become_user: "{{ keycloak_user }}"
+  tags: [keycloak, integration, ldap-federation]
+
+- name: "Get realm-admin role ID from master realm (for composite)"
+  ansible.builtin.shell:
+    cmd: >
+      {{ kcadm }} get clients
+      --server {{ kc_server }}
+      -r {{ keycloak_realm }}
+      --query "clientId=realm-management" --fields id
+      2>/dev/null
+      | python3 -c "
+      import sys, json
+      clients = json.load(sys.stdin)
+      print(clients[0]['id']) if clients else print('')
+      "
+  register: realm_mgmt_client_id
+  changed_when: false
+  become_user: "{{ keycloak_user }}"
+  tags: [keycloak, integration, ldap-federation]
+
+- name: "Assign realm-admin role to FreeIPA admins group"
+  ansible.builtin.command:
+    cmd: >
+      {{ kcadm }} add-roles
+      --server {{ kc_server }}
+      -r {{ keycloak_realm }}
+      --gid {{ admins_group_id.stdout | trim }}
+      --cclientid realm-management
+      --rolename realm-admin
+  when:
+    - admins_group_id.stdout | trim != ""
+    - realm_mgmt_client_id.stdout | trim != ""
+  become_user: "{{ keycloak_user }}"
+  failed_when: false   # tolerate "already assigned"
+  tags: [keycloak, integration, ldap-federation]
+
+# ── Step 8: Trigger full user sync ───────────────────────────────────────────
+
+- name: "Trigger full LDAP user sync"
+  ansible.builtin.command:
+    cmd: >
+      {{ kcadm }} create
+      "user-storage/{{ federation_id }}/sync?action=triggerFullSync"
+      --server {{ kc_server }}
+      -r {{ keycloak_realm }}
+  register: sync_result
+  become_user: "{{ keycloak_user }}"
+  changed_when: true
+  tags: [keycloak, integration, ldap-federation]
+
+- name: "Show sync result"
+  ansible.builtin.debug:
+    msg: "{{ sync_result.stdout }}"
+  tags: [keycloak, integration, ldap-federation]
+
+# ── Step 9: Validate ─────────────────────────────────────────────────────────
+
+- name: "Wait up to 30 s for synced users to appear"
+  ansible.builtin.uri:
+    url: "{{ kc_server }}/admin/realms/{{ keycloak_realm }}/users?max=1"
+    method: GET
+    headers:
+      Authorization: "Bearer {{ keycloak_admin_token | default('') }}"
+    status_code: [200]
+  register: user_list_check
+  retries: 6
+  delay: 5
+  until: (user_list_check.json | length) > 0
+  ignore_errors: true
+  tags: [keycloak, integration, ldap-federation]
+
+- name: "Confirm at least one LDAP user is now in Keycloak"
+  ansible.builtin.command:
+    cmd: >
+      {{ kcadm }} get users
+      --server {{ kc_server }}
+      -r {{ keycloak_realm }}
+      --limit 5 --fields username,email,federationLink
+  register: user_list_verify
+  changed_when: false
+  become_user: "{{ keycloak_user }}"
+  tags: [keycloak, integration, ldap-federation]
+
+- name: "Assert LDAP users are present in realm"
+  ansible.builtin.assert:
+    that:
+      - "'federationLink' in user_list_verify.stdout"
+    fail_msg: >
+      No federated LDAP users found in realm {{ keycloak_realm }}.
+      Check LDAP connectivity: {{ keycloak_ldap_url }}
+    success_msg: "FreeIPA LDAP federation verified -- users present with federationLink"
+  tags: [keycloak, integration, ldap-federation]

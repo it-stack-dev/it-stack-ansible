@@ -8,3 +8,8 @@
 - name: "Import FreeIPA configuration tasks"
   ansible.builtin.import_tasks: configure.yml
   tags: [freeipa, configure]
+
+- name: "Create Keycloak LDAP service account in FreeIPA"
+  ansible.builtin.import_tasks: keycloak-svc-account.yml
+  tags: [freeipa, integration, keycloak-svc]
+  when: freeipa_create_keycloak_svc | default(true) | bool

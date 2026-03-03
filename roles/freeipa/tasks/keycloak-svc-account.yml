@@ -1,0 +1,124 @@
+---
+# roles/freeipa/tasks/keycloak-svc-account.yml
+# Create a dedicated read-only service account in FreeIPA used by Keycloak
+# for LDAP federation.  Safe to re-run (all ipa commands tolerate "already exists").
+#
+# Vars required (all in vault):
+#   vault_keycloak_ldap_bind_pass  -- password for uid=keycloak-svc
+# Vars from defaults:
+#   freeipa_realm                  -- e.g. IT-STACK.LAB
+#   freeipa_domain                 -- e.g. it-stack.lab
+#   keycloak_ldap_bind_dn          -- full DN of service account
+
+- name: "Obtain Kerberos admin ticket (for IPA commands)"
+  ansible.builtin.shell:
+    cmd: "echo {{ vault_ipa_admin_password }} | kinit admin@{{ freeipa_realm }}"
+  changed_when: false
+  no_log: true
+  tags: [freeipa, integration, keycloak-svc]
+
+- name: "Check if keycloak-svc account already exists"
+  ansible.builtin.shell:
+    cmd: "ipa user-show keycloak-svc 2>&1 || echo NOT_FOUND"
+  register: keycloak_svc_check
+  changed_when: false
+  tags: [freeipa, integration, keycloak-svc]
+
+- name: "Create keycloak-svc service account"
+  ansible.builtin.shell:
+    cmd: >
+      ipa user-add keycloak-svc
+      --first="Keycloak"
+      --last="Service Account"
+      --cn="Keycloak LDAP Service Account"
+      --random 2>&1
+  when: "'NOT_FOUND' in keycloak_svc_check.stdout"
+  register: keycloak_svc_create
+  changed_when: "'Added user' in keycloak_svc_create.stdout"
+  tags: [freeipa, integration, keycloak-svc]
+
+- name: "Set keycloak-svc password from vault"
+  ansible.builtin.shell:
+    cmd: >
+      printf '%s\n%s\n'
+      '{{ vault_keycloak_ldap_bind_pass }}'
+      '{{ vault_keycloak_ldap_bind_pass }}'
+      | ipa passwd keycloak-svc 2>&1 || true
+  when: "'NOT_FOUND' in keycloak_svc_check.stdout"
+  changed_when: false
+  no_log: true
+  tags: [freeipa, integration, keycloak-svc]
+
+# Force a password-change bypass so the account is immediately usable
+# (FreeIPA sets accounts to "must change password" on creation)
+- name: "Reset keycloak-svc password expiry via ldappasswd (direct LDAP)"
+  ansible.builtin.shell:
+    cmd: >
+      ldappasswd
+      -H ldap://localhost:389
+      -D "cn=Directory Manager"
+      -w "{{ vault_ipa_directory_manager_password }}"
+      -s "{{ vault_keycloak_ldap_bind_pass }}"
+      "uid=keycloak-svc,cn=users,cn=accounts,{{ freeipa_ldap_base_dn }}" 2>&1 || true
+  when: "'NOT_FOUND' in keycloak_svc_check.stdout"
+  changed_when: false
+  no_log: true
+  tags: [freeipa, integration, keycloak-svc]
+
+- name: "Add keycloak-svc to sysaccounts (read-only LDAP accessor)"
+  ansible.builtin.shell:
+    cmd: >
+      ldapmodify
+      -H ldap://localhost:389
+      -D "cn=Directory Manager"
+      -w "{{ vault_ipa_directory_manager_password }}" << 'EOF'
+      dn: cn=sysaccounts,cn=etc,{{ freeipa_ldap_base_dn }}
+      changetype: modify
+      add: member
+      member: uid=keycloak-svc,cn=users,cn=accounts,{{ freeipa_ldap_base_dn }}
+      EOF
+  changed_when: false
+  failed_when: false  # tolerate "already member" error
+  no_log: true
+  tags: [freeipa, integration, keycloak-svc]
+
+- name: "Grant keycloak-svc read-only ACI on users and groups"
+  ansible.builtin.shell:
+    cmd: >
+      ldapmodify
+      -H ldap://localhost:389
+      -D "cn=Directory Manager"
+      -w "{{ vault_ipa_directory_manager_password }}" << 'EOF'
+      dn: {{ freeipa_ldap_base_dn }}
+      changetype: modify
+      add: aci
+      aci: (targetattr="cn || uid || mail || givenName || sn || telephoneNumber || mobile || title || departmentNumber || memberOf")
+           (version 3.0;acl "Keycloak LDAP read";allow (read,search,compare)
+           userdn="ldap:///uid=keycloak-svc,cn=users,cn=accounts,{{ freeipa_ldap_base_dn }}";)
+      EOF
+  changed_when: false
+  failed_when: false  # tolerate "already exists" error
+  no_log: true
+  tags: [freeipa, integration, keycloak-svc]
+
+- name: "Verify keycloak-svc can bind and read users"
+  ansible.builtin.shell:
+    cmd: >
+      ldapsearch
+      -H ldap://localhost:389
+      -D "uid=keycloak-svc,cn=users,cn=accounts,{{ freeipa_ldap_base_dn }}"
+      -w "{{ vault_keycloak_ldap_bind_pass }}"
+      -b "cn=users,cn=accounts,{{ freeipa_ldap_base_dn }}"
+      -s one "(objectClass=person)" uid dn 2>&1
+  register: keycloak_svc_verify
+  changed_when: false
+  no_log: true
+  tags: [freeipa, integration, keycloak-svc]
+
+- name: "Assert keycloak-svc bind verification succeeded"
+  ansible.builtin.assert:
+    that:
+      - keycloak_svc_verify.rc == 0
+    fail_msg: "keycloak-svc cannot bind to FreeIPA LDAP -- check password and ACI"
+    success_msg: "keycloak-svc LDAP bind verified successfully"
+  tags: [freeipa, integration, keycloak-svc]
