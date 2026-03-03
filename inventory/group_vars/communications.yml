@@ -1,0 +1,51 @@
+---
+# ============================================================
+# Communications Server Variables (lab-comm1 + lab-pbx1)
+# inventory/group_vars/communications.yml
+# ============================================================
+
+# â”€â”€ iRedMail â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+iredmail_domain:                "{{ it_stack_domain }}"
+iredmail_hostname:              "mail.{{ it_stack_domain }}"
+iredmail_db_type:               "pgsql"
+iredmail_db_host:               "10.0.50.12"
+iredmail_postfix_mynetworks:    "127.0.0.0/8 10.0.50.0/24"
+iredmail_mailbox_size_limit:    "2048M"
+iredmail_message_size_limit:    "100M"
+iredmail_smtp_port:             587
+iredmail_imap_port:             993
+
+# â”€â”€ FreePBX (Asterisk) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+freepbx_version:                "17"
+asterisk_version:               "20"
+freepbx_install_dir:            "/var/www/html/admin"
+freepbx_sip_port:               5060
+freepbx_sips_port:              5061
+freepbx_rtp_start:              10000
+freepbx_rtp_end:                20000
+freepbx_admin_email:            "pbxadmin@{{ it_stack_domain }}"
+freepbx_db_host:                "localhost"
+freepbx_db_name:                "freepbx"
+asterisk_run_user:              "asterisk"
+
+# â”€â”€ Zammad â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+zammad_version:                 "6"
+zammad_db_host:                 "10.0.50.12"
+zammad_db_name:                 "zammad"
+zammad_db_user:                 "zammad"
+zammad_fqdn:                    "desk.{{ it_stack_domain }}"
+zammad_port:                    3000
+zammad_rails_env:               "production"
+zammad_elasticsearch_host:      "10.0.50.12"
+zammad_elasticsearch_port:      9200
+
+# â”€â”€ Zabbix (also on comm1 alongside desk services) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+zabbix_version:                 "6.4"
+zabbix_server_host:             "10.0.50.14"
+zabbix_db_host:                 "10.0.50.12"
+zabbix_db_name:                 "zabbix"
+zabbix_db_user:                 "zabbix"
+zabbix_frontend_fqdn:           "monitor.{{ it_stack_domain }}"
+zabbix_server_port:             10051
+zabbix_agent_port:              10050
+zabbix_web_port:                80

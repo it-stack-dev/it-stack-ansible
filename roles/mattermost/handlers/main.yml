@@ -1,0 +1,11 @@
+﻿---
+# roles/mattermost/handlers/main.yml
+
+- name: "restart mattermost"
+  ansible.builtin.systemd:
+    name: mattermost
+    state: restarted
+
+- name: "reload systemd"
+  ansible.builtin.systemd:
+    daemon_reload: true

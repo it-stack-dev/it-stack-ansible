@@ -1,0 +1,26 @@
+﻿---
+# roles/odoo/tasks/configure.yml
+
+- name: "Deploy Odoo configuration file"
+  ansible.builtin.template:
+    src: odoo.conf.j2
+    dest: /etc/odoo/odoo.conf
+    owner: "{{ odoo_user }}"
+    group: "{{ odoo_group }}"
+    mode: "0640"
+  notify: restart odoo
+
+- name: "Enable and start Odoo"
+  ansible.builtin.systemd:
+    name: odoo
+    enabled: true
+    state: started
+
+- name: "Wait for Odoo web interface"
+  ansible.builtin.uri:
+    url: "http://localhost:{{ odoo_http_port }}/web/health"
+    status_code: 200
+  register: odoo_health
+  retries: 12
+  delay: 10
+  until: odoo_health.status == 200

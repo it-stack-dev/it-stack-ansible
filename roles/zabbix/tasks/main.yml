@@ -1,0 +1,10 @@
+﻿---
+# tasks/main.yml - zabbix
+
+- name: "Import zabbix installation tasks"
+  ansible.builtin.import_tasks: install.yml
+  tags: [zabbix, install]
+
+- name: "Import zabbix configuration tasks"
+  ansible.builtin.import_tasks: configure.yml
+  tags: [zabbix, configure]

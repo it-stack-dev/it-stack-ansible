@@ -1,0 +1,10 @@
+﻿---
+# tasks/main.yml - suitecrm
+
+- name: "Import suitecrm installation tasks"
+  ansible.builtin.import_tasks: install.yml
+  tags: [suitecrm, install]
+
+- name: "Import suitecrm configuration tasks"
+  ansible.builtin.import_tasks: configure.yml
+  tags: [suitecrm, configure]

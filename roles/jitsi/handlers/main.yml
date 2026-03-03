@@ -1,0 +1,21 @@
+﻿---
+# roles/jitsi/handlers/main.yml
+
+- name: "restart jicofo"
+  ansible.builtin.systemd:
+    name: jicofo
+    state: restarted
+
+- name: "restart jitsi-videobridge2"
+  ansible.builtin.systemd:
+    name: jitsi-videobridge2
+    state: restarted
+
+- name: "restart prosody"
+  ansible.builtin.systemd:
+    name: prosody
+    state: restarted
+
+- name: "reload systemd"
+  ansible.builtin.systemd:
+    daemon_reload: true

@@ -1,0 +1,45 @@
+﻿---
+# roles/zammad/tasks/install.yml
+
+- name: "Install Zammad dependencies"
+  ansible.builtin.apt:
+    name:
+      - curl
+      - gnupg
+      - apt-transport-https
+    state: present
+
+- name: "Add Zammad apt signing key"
+  ansible.builtin.get_url:
+    url: "https://dl.packager.io/srv/zammad/zammad/key"
+    dest: /etc/apt/keyrings/zammad.gpg
+    mode: "0644"
+
+- name: "Add Zammad apt repository"
+  ansible.builtin.apt_repository:
+    repo: "deb [signed-by=/etc/apt/keyrings/zammad.gpg] https://dl.packager.io/srv/deb/zammad/zammad/stable/ubuntu 24.04 main"
+    filename: zammad
+    state: present
+    update_cache: true
+
+- name: "Install Zammad {{ zammad_version }}"
+  ansible.builtin.apt:
+    name: "zammad={{ zammad_version }}-1"
+    state: present
+  environment:
+    ZAMMAD_DB_ADAPTER: postgresql
+    ZAMMAD_DB_HOST: "{{ zammad_db_host }}"
+    ZAMMAD_DB_NAME: "{{ zammad_db_name }}"
+    ZAMMAD_DB_USER: "{{ zammad_db_user }}"
+    ZAMMAD_DB_PASS: "{{ vault_zammad_db_pass }}"
+    ZAMMAD_ES_URL: "{{ zammad_elasticsearch_url }}"
+
+- name: "Open Zammad firewall port"
+  community.general.ufw:
+    rule: allow
+    port: "{{ item.port | string }}"
+    proto: "{{ item.proto }}"
+    src: "{{ item.from }}"
+    comment: "Zammad"
+  loop: "{{ zammad_firewall_ports }}"
+  tags: [firewall]

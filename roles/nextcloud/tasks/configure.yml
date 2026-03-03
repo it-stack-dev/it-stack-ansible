@@ -1,0 +1,72 @@
+﻿---
+# roles/nextcloud/tasks/configure.yml
+
+- name: "Deploy PHP-FPM pool config for Nextcloud"
+  ansible.builtin.template:
+    src: nextcloud-fpm.conf.j2
+    dest: /etc/php/8.3/fpm/pool.d/nextcloud.conf
+    mode: "0644"
+  notify: restart php8.3-fpm
+
+- name: "Deploy Nginx vhost for Nextcloud"
+  ansible.builtin.template:
+    src: nextcloud-nginx.conf.j2
+    dest: /etc/nginx/sites-available/nextcloud
+    mode: "0644"
+  notify: restart nginx
+
+- name: "Enable Nextcloud Nginx site"
+  ansible.builtin.file:
+    src: /etc/nginx/sites-available/nextcloud
+    dest: /etc/nginx/sites-enabled/nextcloud
+    state: link
+  notify: restart nginx
+
+- name: "Remove default Nginx site"
+  ansible.builtin.file:
+    path: /etc/nginx/sites-enabled/default
+    state: absent
+  notify: restart nginx
+
+- name: "Run Nextcloud installation (occ maintenance:install)"
+  ansible.builtin.command:
+    cmd: >
+      php occ maintenance:install
+      --database=pgsql
+      --database-host={{ nextcloud_db_host }}
+      --database-name={{ nextcloud_db_name }}
+      --database-user={{ nextcloud_db_user }}
+      --database-pass={{ vault_nextcloud_db_pass }}
+      --admin-user={{ nextcloud_admin_user }}
+      --admin-pass={{ vault_nextcloud_admin_pass }}
+      --data-dir={{ nextcloud_data_dir }}
+    chdir: "{{ nextcloud_install_dir }}"
+    creates: "{{ nextcloud_install_dir }}/config/config.php"
+  become: true
+  become_user: "{{ nextcloud_user }}"
+
+- name: "Set Nextcloud trusted domain"
+  ansible.builtin.command:
+    cmd: "php occ config:system:set trusted_domains 0 --value={{ nextcloud_hostname }}"
+    chdir: "{{ nextcloud_install_dir }}"
+  become: true
+  become_user: "{{ nextcloud_user }}"
+
+- name: "Configure Redis session caching"
+  ansible.builtin.command:
+    cmd: "php occ config:system:set {{ item.key }} --value={{ item.value }}"
+    chdir: "{{ nextcloud_install_dir }}"
+  become: true
+  become_user: "{{ nextcloud_user }}"
+  loop:
+    - { key: "memcache.locking", value: "\\\\OC\\\\Memcache\\\\Redis" }
+    - { key: "memcache.distributed", value: "\\\\OC\\\\Memcache\\\\Redis" }
+    - { key: "redis host", value: "{{ nextcloud_redis_host }}" }
+    - { key: "redis port", value: "{{ nextcloud_redis_port }}" }
+
+- name: "Set up Nextcloud cron job"
+  ansible.builtin.cron:
+    name: "Nextcloud cron"
+    minute: "*/{{ nextcloud_cron_interval }}"
+    user: "{{ nextcloud_user }}"
+    job: "php -f {{ nextcloud_install_dir }}/cron.php"

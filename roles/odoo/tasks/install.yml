@@ -1,0 +1,38 @@
+﻿---
+# roles/odoo/tasks/install.yml
+
+- name: "Add Odoo apt signing key"
+  ansible.builtin.get_url:
+    url: "https://nightly.odoo.com/odoo.key"
+    dest: /etc/apt/keyrings/odoo.gpg
+    mode: "0644"
+
+- name: "Add Odoo {{ odoo_version }} apt repository"
+  ansible.builtin.apt_repository:
+    repo: "deb [signed-by=/etc/apt/keyrings/odoo.gpg] https://nightly.odoo.com/{{ odoo_version }}/nightly/deb/ ./"
+    filename: odoo
+    state: present
+    update_cache: true
+
+- name: "Install Odoo {{ odoo_version }}"
+  ansible.builtin.apt:
+    name: odoo
+    state: present
+
+- name: "Create Odoo log directory"
+  ansible.builtin.file:
+    path: "{{ odoo_log_dir }}"
+    state: directory
+    owner: "{{ odoo_user }}"
+    group: "{{ odoo_group }}"
+    mode: "0750"
+
+- name: "Open Odoo firewall ports"
+  community.general.ufw:
+    rule: allow
+    port: "{{ item.port | string }}"
+    proto: "{{ item.proto }}"
+    src: "{{ item.from }}"
+    comment: "Odoo"
+  loop: "{{ odoo_firewall_ports }}"
+  tags: [firewall]

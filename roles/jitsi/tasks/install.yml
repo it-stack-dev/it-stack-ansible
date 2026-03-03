@@ -1,0 +1,50 @@
+﻿---
+# roles/jitsi/tasks/install.yml
+
+- name: "Add Jitsi apt signing key"
+  ansible.builtin.get_url:
+    url: "https://download.jitsi.org/jitsi-key.gpg.key"
+    dest: /etc/apt/keyrings/jitsi.gpg
+    mode: "0644"
+
+- name: "Add Jitsi apt repository"
+  ansible.builtin.apt_repository:
+    repo: "deb [signed-by=/etc/apt/keyrings/jitsi.gpg] https://download.jitsi.org stable/"
+    filename: jitsi
+    state: present
+    update_cache: true
+
+- name: "Pre-configure Jitsi hostname debconf"
+  ansible.builtin.debconf:
+    name: jitsi-meet
+    question: jitsi-meet/jvb-hostname
+    vtype: string
+    value: "{{ jitsi_xmpp_domain }}"
+
+- name: "Pre-configure Jitsi SSL type debconf"
+  ansible.builtin.debconf:
+    name: jitsi-meet
+    question: jitsi-meet/cert-choice
+    vtype: select
+    value: "Generate a new self-signed certificate"
+
+- name: "Install Jitsi Meet"
+  ansible.builtin.apt:
+    name:
+      - jitsi-meet
+      - jitsi-videobridge2
+      - jicofo
+      - prosody
+      - coturn
+    state: present
+    install_recommends: false
+
+- name: "Open Jitsi firewall ports"
+  community.general.ufw:
+    rule: allow
+    port: "{{ item.port | string }}"
+    proto: "{{ item.proto }}"
+    src: "{{ item.from }}"
+    comment: "Jitsi"
+  loop: "{{ jitsi_firewall_ports }}"
+  tags: [firewall]

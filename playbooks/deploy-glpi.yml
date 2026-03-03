@@ -1,0 +1,49 @@
+---
+# playbooks/deploy-glpi.yml
+# Deploy and configure GLPI ITSM on lab-mgmt1.
+# Run with: make deploy-glpi
+#
+# Prerequisites:
+#   - PostgreSQL running; Snipe-IT deployed (for asset sync API)
+#   - vault/secrets.yml contains: vault_pg_glpi_pass, vault_glpi_admin_pass
+
+- name: "Deploy GLPI IT Service Management"
+  hosts: it_management
+  gather_facts: true
+  vars_files:
+    - ../vault/secrets.yml
+
+  pre_tasks:
+    - name: "Assert GLPI vault vars present"
+      ansible.builtin.assert:
+        that:
+          - vault_pg_glpi_pass is defined
+          - vault_glpi_admin_pass is defined
+        fail_msg: "Missing GLPI vault variables in vault/secrets.yml"
+
+  roles:
+    - role: common
+      tags: [common]
+    - role: glpi
+      tags: [glpi, it-management, itsm]
+
+  post_tasks:
+    - name: "Verify GLPI HTTP response"
+      ansible.builtin.uri:
+        url: "http://localhost/"
+        return_content: false
+        status_code: 200
+        follow_redirects: all
+      register: glpi_status
+      ignore_errors: true
+      tags: [verify]
+
+    - name: "Display GLPI deployment summary"
+      ansible.builtin.debug:
+        msg:
+          - "GLPI {{ glpi_version }} deployed on {{ inventory_hostname }}"
+          - "URL: {{ glpi_site_url }}"
+          - "Install dir: {{ glpi_install_dir }}"
+          - "Files dir: {{ glpi_files_dir }}"
+          - "DB: {{ glpi_db_host }} / {{ glpi_db_name }}"
+      tags: [verify]

@@ -1,0 +1,35 @@
+﻿---
+# roles/graylog/defaults/main.yml
+
+graylog_version:           "6.0"
+graylog_install_dir:       "/etc/graylog"
+graylog_data_dir:          "/var/lib/graylog-server"
+graylog_log_dir:           "/var/log/graylog-server"
+graylog_user:              "graylog"
+graylog_group:             "graylog"
+
+graylog_http_port:         9000
+graylog_hostname:          "logs.example.com"
+
+graylog_mongodb_uri:       "mongodb://localhost:27017/graylog"
+graylog_elasticsearch_hosts: "http://10.0.50.12:9200"
+
+graylog_keycloak_url:      "https://id.example.com"
+graylog_keycloak_realm:    "it-stack"
+graylog_oidc_client:       "graylog"
+
+graylog_heap_size:         "2g"
+graylog_message_journal_max_size: "5gb"
+
+graylog_inputs:
+  - { title: "Syslog UDP",  type: "org.graylog2.inputs.syslog.udp.SyslogUDPInput",  port: 1514 }
+  - { title: "GELF UDP",    type: "org.graylog2.inputs.gelf.udp.GELFUDPInput",      port: 12201 }
+  - { title: "GELF HTTP",   type: "org.graylog2.inputs.gelf.http.GELFHTTPInput",    port: 12202 }
+
+graylog_zabbix_api_url:    "http://10.0.50.14:10051"
+
+graylog_firewall_ports:
+  - { port: "9000",  proto: tcp, from: "10.0.50.0/24" }
+  - { port: "1514",  proto: udp, from: "10.0.50.0/24" }
+  - { port: "12201", proto: udp, from: "10.0.50.0/24" }
+  - { port: "12202", proto: tcp, from: "10.0.50.0/24" }

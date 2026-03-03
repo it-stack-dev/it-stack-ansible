@@ -1,0 +1,35 @@
+---
+# roles/mattermost/defaults/main.yml
+
+mattermost_version:       "9.7.1"
+mattermost_install_dir:   "/opt/mattermost"
+mattermost_data_dir:      "/var/lib/mattermost/data"
+mattermost_log_dir:       "/var/log/mattermost"
+mattermost_user:          "mattermost"
+mattermost_group:         "mattermost"
+
+mattermost_port:          8065
+mattermost_hostname:      "chat.example.com"
+
+mattermost_db_host:       "10.0.50.12"
+mattermost_db_port:       5432
+mattermost_db_name:       "mattermost"
+mattermost_db_user:       "mattermost"
+
+mattermost_redis_host:    "10.0.50.12"
+mattermost_redis_port:    6379
+
+mattermost_keycloak_url:  "https://id.example.com"
+mattermost_keycloak_realm: "it-stack"
+mattermost_oidc_client:   "mattermost"
+
+mattermost_site_name:     "IT-Stack Chat"
+mattermost_team_name:     "it-stack"
+mattermost_max_file_size: 52428800   # 50 MB
+
+mattermost_smtp_host:     "10.0.50.14"
+mattermost_smtp_port:     25
+mattermost_smtp_from:     "mattermost@example.com"
+
+mattermost_firewall_ports:
+  - { port: "8065", proto: tcp, from: "10.0.50.0/24" }

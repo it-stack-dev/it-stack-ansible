@@ -1,0 +1,10 @@
+﻿---
+# tasks/main.yml - freepbx
+
+- name: "Import freepbx installation tasks"
+  ansible.builtin.import_tasks: install.yml
+  tags: [freepbx, install]
+
+- name: "Import freepbx configuration tasks"
+  ansible.builtin.import_tasks: configure.yml
+  tags: [freepbx, configure]

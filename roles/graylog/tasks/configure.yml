@@ -1,0 +1,38 @@
+﻿---
+# roles/graylog/tasks/configure.yml
+
+- name: "Generate Graylog password secret"
+  ansible.builtin.command:
+    cmd: "pwgen -N 1 -s 96"
+  register: graylog_password_secret
+  changed_when: false
+
+- name: "Generate Graylog SHA256 admin password"
+  ansible.builtin.command:
+    cmd: "sh -c 'echo -n {{ vault_graylog_admin_pass }} | sha256sum | cut -d\" \" -f1'"
+  register: graylog_admin_sha256
+  changed_when: false
+
+- name: "Deploy Graylog server.conf"
+  ansible.builtin.template:
+    src: graylog-server.conf.j2
+    dest: /etc/graylog/server/server.conf
+    owner: "{{ graylog_user }}"
+    group: "{{ graylog_group }}"
+    mode: "0640"
+  notify: restart graylog-server
+
+- name: "Enable and start Graylog"
+  ansible.builtin.systemd:
+    name: graylog-server
+    enabled: true
+    state: started
+
+- name: "Wait for Graylog web API"
+  ansible.builtin.uri:
+    url: "http://localhost:{{ graylog_http_port }}/api"
+    status_code: 200
+  register: graylog_api
+  retries: 18
+  delay: 10
+  until: graylog_api.status == 200

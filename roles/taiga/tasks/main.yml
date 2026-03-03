@@ -1,0 +1,10 @@
+﻿---
+# tasks/main.yml - taiga
+
+- name: "Import taiga installation tasks"
+  ansible.builtin.import_tasks: install.yml
+  tags: [taiga, install]
+
+- name: "Import taiga configuration tasks"
+  ansible.builtin.import_tasks: configure.yml
+  tags: [taiga, configure]

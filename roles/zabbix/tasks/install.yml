@@ -1,0 +1,46 @@
+﻿---
+# roles/zabbix/tasks/install.yml
+
+- name: "Download Zabbix {{ zabbix_version }} apt repository package"
+  ansible.builtin.get_url:
+    url: "https://repo.zabbix.com/zabbix/{{ zabbix_version }}/ubuntu/pool/main/z/zabbix-release/zabbix-release_{{ zabbix_version }}-2+ubuntu24.04_all.deb"
+    dest: "/tmp/zabbix-release.deb"
+    mode: "0644"
+
+- name: "Install Zabbix apt repository"
+  ansible.builtin.apt:
+    deb: /tmp/zabbix-release.deb
+    state: present
+
+- name: "Update apt cache after adding Zabbix repo"
+  ansible.builtin.apt:
+    update_cache: true
+
+- name: "Install Zabbix server, frontend, agent"
+  ansible.builtin.apt:
+    name:
+      - zabbix-server-pgsql
+      - zabbix-frontend-php
+      - zabbix-nginx-conf
+      - zabbix-agent2
+      - zabbix-sql-scripts
+      - php8.3-pgsql
+    state: present
+
+- name: "Create Zabbix log directory"
+  ansible.builtin.file:
+    path: "{{ zabbix_log_dir }}"
+    state: directory
+    owner: "{{ zabbix_user }}"
+    group: "{{ zabbix_group }}"
+    mode: "0750"
+
+- name: "Open Zabbix firewall ports"
+  community.general.ufw:
+    rule: allow
+    port: "{{ item.port | string }}"
+    proto: "{{ item.proto }}"
+    src: "{{ item.from }}"
+    comment: "Zabbix"
+  loop: "{{ zabbix_firewall_ports }}"
+  tags: [firewall]

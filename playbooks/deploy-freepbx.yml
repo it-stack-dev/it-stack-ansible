@@ -1,0 +1,47 @@
+---
+# playbooks/deploy-freepbx.yml
+# Deploy and configure FreePBX (Asterisk) on lab-pbx1.
+# Run with: make deploy-freepbx
+#
+# Prerequisites:
+#   - Phase 1 complete; iRedMail deployed for voicemail-to-email
+#   - vault/secrets.yml contains: vault_freepbx_admin_pass, vault_freepbx_db_pass
+
+- name: "Deploy FreePBX VoIP PBX"
+  hosts: communications
+  gather_facts: true
+  vars_files:
+    - ../vault/secrets.yml
+
+  pre_tasks:
+    - name: "Assert FreePBX vault vars present"
+      ansible.builtin.assert:
+        that:
+          - vault_freepbx_admin_pass is defined
+          - vault_freepbx_db_pass is defined
+        fail_msg: "Missing FreePBX vault variables in vault/secrets.yml"
+
+  roles:
+    - role: common
+      tags: [common]
+    - role: freepbx
+      tags: [freepbx, voip, communications]
+
+  post_tasks:
+    - name: "Verify SIP port listening"
+      ansible.builtin.wait_for:
+        port: "{{ freepbx_sip_port }}"
+        host: localhost
+        timeout: 30
+        msg: "SIP port {{ freepbx_sip_port }} not listening"
+      ignore_errors: true
+      tags: [verify]
+
+    - name: "Display FreePBX deployment summary"
+      ansible.builtin.debug:
+        msg:
+          - "FreePBX {{ freepbx_version }} (Asterisk {{ asterisk_version }}) deployed on {{ inventory_hostname }}"
+          - "Admin URL: https://{{ inventory_hostname }}/admin"
+          - "SIP port: {{ freepbx_sip_port }} (TCP/UDP)"
+          - "RTP range: {{ freepbx_rtp_start }}-{{ freepbx_rtp_end }}/UDP"
+      tags: [verify]

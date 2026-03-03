@@ -1,0 +1,49 @@
+---
+# playbooks/deploy-nextcloud.yml
+# Deploy and configure Nextcloud 28 on lab-app1.
+# Run with: make deploy-nextcloud
+#
+# Prerequisites:
+#   - Phase 1 complete (FreeIPA, PostgreSQL, Redis, Keycloak, Traefik)
+#   - vault/secrets.yml contains: vault_pg_nextcloud_pass, vault_nextcloud_admin_pass
+#   - DNS record: cloud.<domain> â†’ lab-proxy1 (10.0.50.15)
+
+- name: "Deploy Nextcloud Collaboration Platform"
+  hosts: collaboration
+  gather_facts: true
+  vars_files:
+    - ../vault/secrets.yml
+
+  pre_tasks:
+    - name: "Assert Nextcloud vault vars present"
+      ansible.builtin.assert:
+        that:
+          - vault_pg_nextcloud_pass is defined
+          - vault_nextcloud_admin_pass is defined
+        fail_msg: "Missing Nextcloud vault variables in vault/secrets.yml"
+
+  roles:
+    - role: common
+      tags: [common]
+    - role: nextcloud
+      tags: [nextcloud, collaboration]
+
+  post_tasks:
+    - name: "Verify Nextcloud status endpoint"
+      ansible.builtin.uri:
+        url: "http://localhost/status.php"
+        return_content: true
+        status_code: 200
+      register: nc_status
+      ignore_errors: true
+      tags: [verify]
+
+    - name: "Display Nextcloud deployment summary"
+      ansible.builtin.debug:
+        msg:
+          - "Nextcloud {{ nextcloud_version }} deployed on {{ inventory_hostname }}"
+          - "URL: https://cloud.{{ it_stack_domain }}"
+          - "Admin user: {{ nextcloud_admin_user }}"
+          - "Data dir: {{ nextcloud_data_dir }}"
+          - "DB host: {{ nextcloud_db_host }} / {{ nextcloud_db_name }}"
+      tags: [verify]

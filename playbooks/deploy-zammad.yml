@@ -1,0 +1,48 @@
+---
+# playbooks/deploy-zammad.yml
+# Deploy and configure Zammad Help Desk on lab-comm1.
+# Run with: make deploy-zammad
+#
+# Prerequisites:
+#   - PostgreSQL + Elasticsearch running; iRedMail deployed for email integration
+#   - vault/secrets.yml contains: vault_pg_zammad_pass, vault_zammad_secret_key_base
+
+- name: "Deploy Zammad Help Desk"
+  hosts: communications
+  gather_facts: true
+  vars_files:
+    - ../vault/secrets.yml
+
+  pre_tasks:
+    - name: "Assert Zammad vault vars present"
+      ansible.builtin.assert:
+        that:
+          - vault_pg_zammad_pass is defined
+          - vault_zammad_secret_key_base is defined
+        fail_msg: "Missing Zammad vault variables in vault/secrets.yml"
+
+  roles:
+    - role: common
+      tags: [common]
+    - role: zammad
+      tags: [zammad, communications, helpdesk]
+
+  post_tasks:
+    - name: "Verify Zammad health endpoint"
+      ansible.builtin.uri:
+        url: "http://localhost:{{ zammad_port }}/api/v1/getting_started"
+        return_content: true
+        status_code: 200
+      register: zammad_health
+      ignore_errors: true
+      tags: [verify]
+
+    - name: "Display Zammad deployment summary"
+      ansible.builtin.debug:
+        msg:
+          - "Zammad {{ zammad_version }} deployed on {{ inventory_hostname }}"
+          - "URL: https://{{ zammad_fqdn }}"
+          - "Port: {{ zammad_port }}"
+          - "DB: {{ zammad_db_host }} / {{ zammad_db_name }}"
+          - "Elasticsearch: {{ zammad_elasticsearch_host }}:{{ zammad_elasticsearch_port }}"
+      tags: [verify]

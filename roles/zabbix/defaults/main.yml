@@ -1,0 +1,44 @@
+﻿---
+# roles/zabbix/defaults/main.yml
+
+zabbix_version:           "7.0"
+zabbix_install_dir:       "/etc/zabbix"
+zabbix_log_dir:           "/var/log/zabbix"
+zabbix_user:              "zabbix"
+zabbix_group:             "zabbix"
+
+zabbix_server_port:       10051
+zabbix_agent_port:        10050
+zabbix_web_port:          80
+zabbix_hostname:          "monitoring.example.com"
+
+zabbix_db_host:           "10.0.50.12"
+zabbix_db_port:           5432
+zabbix_db_name:           "zabbix"
+zabbix_db_user:           "zabbix"
+
+zabbix_keycloak_url:      "https://id.example.com"
+zabbix_keycloak_realm:    "it-stack"
+zabbix_saml_client:       "zabbix"
+
+zabbix_mattermost_webhook: "https://chat.example.com/hooks/zabbix-ops-alerts"
+zabbix_admin_email:       "ops@example.com"
+
+zabbix_smtp_host:         "10.0.50.14"
+zabbix_smtp_port:         25
+zabbix_smtp_from:         "zabbix@example.com"
+
+zabbix_monitored_hosts:
+  - { host: "lab-id1",    ip: "10.0.50.11", group: "Identity" }
+  - { host: "lab-db1",    ip: "10.0.50.12", group: "Database" }
+  - { host: "lab-app1",   ip: "10.0.50.13", group: "Collaboration" }
+  - { host: "lab-comm1",  ip: "10.0.50.14", group: "Communications" }
+  - { host: "lab-proxy1", ip: "10.0.50.15", group: "Infrastructure" }
+  - { host: "lab-pbx1",   ip: "10.0.50.16", group: "VoIP" }
+  - { host: "lab-biz1",   ip: "10.0.50.17", group: "Business" }
+  - { host: "lab-mgmt1",  ip: "10.0.50.18", group: "IT-Management" }
+
+zabbix_firewall_ports:
+  - { port: "10051", proto: tcp, from: "10.0.50.0/24" }
+  - { port: "10050", proto: tcp, from: "10.0.50.0/24" }
+  - { port: "80",    proto: tcp, from: "10.0.50.0/24" }

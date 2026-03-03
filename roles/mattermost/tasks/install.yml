@@ -1,0 +1,76 @@
+﻿---
+# roles/mattermost/tasks/install.yml
+
+- name: "Create mattermost system group"
+  ansible.builtin.group:
+    name: "{{ mattermost_group }}"
+    state: present
+    system: true
+
+- name: "Create mattermost system user"
+  ansible.builtin.user:
+    name: "{{ mattermost_user }}"
+    group: "{{ mattermost_group }}"
+    home: "{{ mattermost_install_dir }}"
+    shell: /usr/sbin/nologin
+    system: true
+    create_home: false
+
+- name: "Create Mattermost directories"
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: "{{ mattermost_user }}"
+    group: "{{ mattermost_group }}"
+    mode: "0750"
+  loop:
+    - "{{ mattermost_install_dir }}"
+    - "{{ mattermost_data_dir }}"
+    - "{{ mattermost_log_dir }}"
+
+- name: "Check if Mattermost {{ mattermost_version }} is installed"
+  ansible.builtin.stat:
+    path: "{{ mattermost_install_dir }}/mattermost-{{ mattermost_version }}/bin/mattermost"
+  register: mm_bin
+
+- name: "Download Mattermost {{ mattermost_version }}"
+  ansible.builtin.get_url:
+    url: "https://releases.mattermost.com/{{ mattermost_version }}/mattermost-{{ mattermost_version }}-linux-amd64.tar.gz"
+    dest: "/tmp/mattermost-{{ mattermost_version }}.tar.gz"
+    mode: "0644"
+  when: not mm_bin.stat.exists
+
+- name: "Extract Mattermost archive"
+  ansible.builtin.unarchive:
+    src: "/tmp/mattermost-{{ mattermost_version }}.tar.gz"
+    dest: "{{ mattermost_install_dir }}"
+    remote_src: true
+    owner: "{{ mattermost_user }}"
+    group: "{{ mattermost_group }}"
+    extra_opts: [--transform, "s/^mattermost/mattermost-{{ mattermost_version }}/"]
+  when: not mm_bin.stat.exists
+
+- name: "Symlink mattermost/current â†’ versioned directory"
+  ansible.builtin.file:
+    src: "{{ mattermost_install_dir }}/mattermost-{{ mattermost_version }}"
+    dest: "{{ mattermost_install_dir }}/current"
+    state: link
+    owner: "{{ mattermost_user }}"
+    group: "{{ mattermost_group }}"
+
+- name: "Deploy Mattermost systemd service"
+  ansible.builtin.template:
+    src: mattermost.service.j2
+    dest: /etc/systemd/system/mattermost.service
+    mode: "0644"
+  notify: [reload systemd, restart mattermost]
+
+- name: "Open Mattermost firewall port"
+  community.general.ufw:
+    rule: allow
+    port: "{{ item.port | string }}"
+    proto: "{{ item.proto }}"
+    src: "{{ item.from }}"
+    comment: "Mattermost"
+  loop: "{{ mattermost_firewall_ports }}"
+  tags: [firewall]

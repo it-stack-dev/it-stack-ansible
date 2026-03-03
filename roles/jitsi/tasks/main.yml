@@ -1,0 +1,10 @@
+﻿---
+# tasks/main.yml - jitsi
+
+- name: "Import jitsi installation tasks"
+  ansible.builtin.import_tasks: install.yml
+  tags: [jitsi, install]
+
+- name: "Import jitsi configuration tasks"
+  ansible.builtin.import_tasks: configure.yml
+  tags: [jitsi, configure]

@@ -1,0 +1,61 @@
+﻿# templates/nextcloud-nginx.conf.j2
+
+upstream php-handler {
+    server unix:/run/php/php8.3-fpm-nextcloud.sock;
+}
+
+server {
+    listen 80;
+    server_name {{ nextcloud_hostname }};
+    return 301 https://\System.Management.Automation.Internal.Host.InternalHost\;
+}
+
+server {
+    listen 443 ssl http2;
+    server_name {{ nextcloud_hostname }};
+
+    ssl_certificate     /etc/ssl/certs/it-stack.crt;
+    ssl_certificate_key /etc/ssl/private/it-stack.key;
+
+    root {{ nextcloud_install_dir }};
+    index index.php index.html;
+
+    client_max_body_size {{ nextcloud_max_upload_size }};
+    fastcgi_buffers 64 4K;
+
+    add_header Strict-Transport-Security "max-age=31536000; includeSubDomains; preload";
+    add_header Referrer-Policy "no-referrer";
+    add_header X-Content-Type-Options "nosniff";
+    add_header X-Frame-Options "SAMEORIGIN";
+    add_header X-Permitted-Cross-Domain-Policies "none";
+    add_header X-Robots-Tag "none";
+    add_header X-XSS-Protection "1; mode=block";
+
+    location = /robots.txt { allow all; log_not_found off; access_log off; }
+
+    location ~ ^/(?:build|tests|config|lib|3rdparty|templates|data)(?:\$|/) { deny all; }
+    location ~ ^/(?:\.|autotest|occ|issue|indie|db_|console) { deny all; }
+
+    location / {
+        rewrite ^ /index.php;
+    }
+
+    location ~ ^\/(?:index|remote|public|cron|core\/ajax\/update|status|ocs\/v[12]|updater\/.+|oc[ms]-provider\/.+|.+\/richdocumentscode\/proxy)\.php(?:\$|\/) {
+        fastcgi_split_path_info ^(.+?\.php)(\/.*|\$);
+        include fastcgi_params;
+        fastcgi_param SCRIPT_FILENAME \\;
+        fastcgi_param PATH_INFO \;
+        fastcgi_pass php-handler;
+        fastcgi_read_timeout 3600;
+    }
+
+    location ~ \.(?:css|js|woff2?|svg|gif|map)\$ {
+        try_files \ /index.php\;
+        expires 6M;
+        add_header Cache-Control "public";
+    }
+
+    location ~ \.(?:png|html|ttf|ico|jpg|jpeg|bcmap|mp4|webm)\$ {
+        try_files \ /index.php\;
+    }
+}

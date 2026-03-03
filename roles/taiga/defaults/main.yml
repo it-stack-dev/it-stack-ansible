@@ -1,0 +1,40 @@
+﻿---
+# roles/taiga/defaults/main.yml
+
+taiga_version:            "6.8.1"
+taiga_install_dir:        "/opt/taiga"
+taiga_log_dir:            "/var/log/taiga"
+taiga_user:               "taiga"
+taiga_group:              "taiga"
+
+taiga_backend_port:       8000
+taiga_frontend_port:      9001
+taiga_events_port:        8888
+taiga_hostname:           "pm.example.com"
+
+taiga_db_host:            "10.0.50.12"
+taiga_db_port:            5432
+taiga_db_name:            "taiga"
+taiga_db_user:            "taiga"
+
+taiga_redis_url:          "redis://10.0.50.12:6379/0"
+taiga_events_redis:       "redis://10.0.50.12:6379/1"
+
+taiga_keycloak_url:       "https://id.example.com"
+taiga_keycloak_realm:     "it-stack"
+taiga_oidc_client:        "taiga"
+
+taiga_mattermost_webhook: "https://chat.example.com/hooks/taiga-webhook"
+
+taiga_django_workers:     3
+taiga_async_workers:      2
+taiga_python_version:     "3.12"
+
+taiga_smtp_host:          "10.0.50.14"
+taiga_smtp_port:          25
+taiga_smtp_from:          "taiga@example.com"
+
+taiga_firewall_ports:
+  - { port: "8000", proto: tcp, from: "10.0.50.0/24" }
+  - { port: "9001", proto: tcp, from: "10.0.50.0/24" }
+  - { port: "8888", proto: tcp, from: "10.0.50.0/24" }

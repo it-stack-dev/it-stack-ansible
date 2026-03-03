@@ -1,0 +1,26 @@
+﻿---
+# roles/taiga/handlers/main.yml
+
+- name: "restart taiga-backend"
+  ansible.builtin.systemd:
+    name: taiga-backend
+    state: restarted
+
+- name: "restart taiga-async"
+  ansible.builtin.systemd:
+    name: taiga-async
+    state: restarted
+
+- name: "restart taiga-events"
+  ansible.builtin.systemd:
+    name: taiga-events
+    state: restarted
+
+- name: "restart nginx"
+  ansible.builtin.systemd:
+    name: nginx
+    state: restarted
+
+- name: "reload systemd"
+  ansible.builtin.systemd:
+    daemon_reload: true

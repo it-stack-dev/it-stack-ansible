@@ -1,0 +1,54 @@
+﻿---
+# roles/taiga/tasks/configure.yml
+
+- name: "Deploy Taiga backend config"
+  ansible.builtin.template:
+    src: taiga-settings-production.py.j2
+    dest: "{{ taiga_install_dir }}/back/settings/production.py"
+    owner: "{{ taiga_user }}"
+    group: "{{ taiga_group }}"
+    mode: "0640"
+  notify: restart taiga-backend
+
+- name: "Run Taiga database migrations"
+  ansible.builtin.command:
+    cmd: "{{ taiga_install_dir }}/venv/bin/python manage.py migrate --noinput"
+    chdir: "{{ taiga_install_dir }}/back"
+  environment:
+    DJANGO_SETTINGS_MODULE: settings.production
+  become: true
+  become_user: "{{ taiga_user }}"
+  changed_when: false
+
+- name: "Collect static files"
+  ansible.builtin.command:
+    cmd: "{{ taiga_install_dir }}/venv/bin/python manage.py collectstatic --noinput"
+    chdir: "{{ taiga_install_dir }}/back"
+  environment:
+    DJANGO_SETTINGS_MODULE: settings.production
+  become: true
+  become_user: "{{ taiga_user }}"
+  changed_when: false
+
+- name: "Deploy Nginx vhost for Taiga"
+  ansible.builtin.template:
+    src: taiga-nginx.conf.j2
+    dest: /etc/nginx/sites-available/taiga
+    mode: "0644"
+  notify: restart nginx
+
+- name: "Enable Taiga Nginx site"
+  ansible.builtin.file:
+    src: /etc/nginx/sites-available/taiga
+    dest: /etc/nginx/sites-enabled/taiga
+    state: link
+  notify: restart nginx
+
+- name: "Enable and start Taiga services"
+  ansible.builtin.systemd:
+    name: "{{ item }}"
+    enabled: true
+    state: started
+  loop:
+    - taiga-backend
+    - taiga-async

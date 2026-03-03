@@ -1,0 +1,65 @@
+﻿---
+# roles/openkm/tasks/install.yml
+
+- name: "Install Java 17 JRE"
+  ansible.builtin.apt:
+    name: openjdk-17-jre-headless
+    state: present
+
+- name: "Create OpenKM system group"
+  ansible.builtin.group:
+    name: "{{ openkm_group }}"
+    state: present
+    system: true
+
+- name: "Create OpenKM system user"
+  ansible.builtin.user:
+    name: "{{ openkm_user }}"
+    group: "{{ openkm_group }}"
+    home: "{{ openkm_install_dir }}"
+    shell: /usr/sbin/nologin
+    system: true
+    create_home: false
+
+- name: "Create OpenKM directories"
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: "{{ openkm_user }}"
+    group: "{{ openkm_group }}"
+    mode: "0750"
+  loop:
+    - "{{ openkm_install_dir }}"
+    - "{{ openkm_data_dir }}"
+    - "{{ openkm_log_dir }}"
+
+- name: "Check if OpenKM WAR is deployed"
+  ansible.builtin.stat:
+    path: "{{ openkm_install_dir }}/openkm.war"
+  register: okm_war
+
+- name: "Download OpenKM Community {{ openkm_version }}"
+  ansible.builtin.get_url:
+    url: "https://github.com/openkm/document-management-system/releases/download/{{ openkm_version }}/openkm-ce-{{ openkm_version }}.war"
+    dest: "{{ openkm_install_dir }}/openkm.war"
+    owner: "{{ openkm_user }}"
+    group: "{{ openkm_group }}"
+    mode: "0640"
+  when: not okm_war.stat.exists
+
+- name: "Deploy OpenKM systemd service"
+  ansible.builtin.template:
+    src: openkm.service.j2
+    dest: /etc/systemd/system/openkm.service
+    mode: "0644"
+  notify: [reload systemd, restart openkm]
+
+- name: "Open OpenKM firewall ports"
+  community.general.ufw:
+    rule: allow
+    port: "{{ item.port | string }}"
+    proto: "{{ item.proto }}"
+    src: "{{ item.from }}"
+    comment: "OpenKM"
+  loop: "{{ openkm_firewall_ports }}"
+  tags: [firewall]

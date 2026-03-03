@@ -1,0 +1,38 @@
+﻿---
+# roles/zammad/tasks/configure.yml
+
+- name: "Configure Zammad FQDN"
+  ansible.builtin.command:
+    cmd: "zammad run rails r \"Setting.set('fqdn', '{{ zammad_fqdn }}')\""
+  become: true
+  become_user: "{{ zammad_user }}"
+  changed_when: false
+
+- name: "Configure Zammad HTTP type"
+  ansible.builtin.command:
+    cmd: "zammad run rails r \"Setting.set('http_type', '{{ zammad_http_type }}')\""
+  become: true
+  become_user: "{{ zammad_user }}"
+  changed_when: false
+
+- name: "Rebuild Zammad Elasticsearch index"
+  ansible.builtin.command:
+    cmd: "zammad run rails r \"SearchIndexBackend.create_index\""
+  become: true
+  become_user: "{{ zammad_user }}"
+  changed_when: false
+
+- name: "Ensure Zammad service is enabled and started"
+  ansible.builtin.systemd:
+    name: zammad
+    enabled: true
+    state: started
+
+- name: "Wait for Zammad to respond on port {{ zammad_port }}"
+  ansible.builtin.uri:
+    url: "http://localhost:{{ zammad_port }}/"
+    status_code: [200, 302]
+  register: zammad_health
+  retries: 18
+  delay: 10
+  until: zammad_health.status in [200, 302]

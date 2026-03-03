@@ -1,0 +1,31 @@
+﻿---
+# roles/suitecrm/tasks/configure.yml
+
+- name: "Deploy Nginx vhost for SuiteCRM"
+  ansible.builtin.template:
+    src: suitecrm-nginx.conf.j2
+    dest: /etc/nginx/sites-available/suitecrm
+    mode: "0644"
+  notify: restart nginx
+
+- name: "Enable SuiteCRM Nginx site"
+  ansible.builtin.file:
+    src: /etc/nginx/sites-available/suitecrm
+    dest: /etc/nginx/sites-enabled/suitecrm
+    state: link
+  notify: restart nginx
+
+- name: "Deploy SuiteCRM config_override.php"
+  ansible.builtin.template:
+    src: suitecrm-config_override.php.j2
+    dest: "{{ suitecrm_install_dir }}/config_override.php"
+    owner: "{{ suitecrm_user }}"
+    group: "{{ suitecrm_group }}"
+    mode: "0600"
+
+- name: "Set up SuiteCRM cron job"
+  ansible.builtin.cron:
+    name: "SuiteCRM cron"
+    minute: "*/{{ suitecrm_cron_interval }}"
+    user: "{{ suitecrm_user }}"
+    job: "php -f {{ suitecrm_install_dir }}/cron.php > /dev/null 2>&1"

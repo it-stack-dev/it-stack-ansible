@@ -1,0 +1,10 @@
+﻿---
+# tasks/main.yml - odoo
+
+- name: "Import odoo installation tasks"
+  ansible.builtin.import_tasks: install.yml
+  tags: [odoo, install]
+
+- name: "Import odoo configuration tasks"
+  ansible.builtin.import_tasks: configure.yml
+  tags: [odoo, configure]

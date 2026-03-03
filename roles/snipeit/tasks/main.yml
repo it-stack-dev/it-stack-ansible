@@ -1,0 +1,10 @@
+﻿---
+# tasks/main.yml - snipeit
+
+- name: "Import snipeit installation tasks"
+  ansible.builtin.import_tasks: install.yml
+  tags: [snipeit, install]
+
+- name: "Import snipeit configuration tasks"
+  ansible.builtin.import_tasks: configure.yml
+  tags: [snipeit, configure]

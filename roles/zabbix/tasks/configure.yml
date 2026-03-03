@@ -1,0 +1,45 @@
+﻿---
+# roles/zabbix/tasks/configure.yml
+
+- name: "Deploy zabbix_server.conf"
+  ansible.builtin.template:
+    src: zabbix_server.conf.j2
+    dest: /etc/zabbix/zabbix_server.conf
+    owner: root
+    group: "{{ zabbix_group }}"
+    mode: "0640"
+  notify: restart zabbix-server
+
+- name: "Import Zabbix initial schema (once)"
+  ansible.builtin.shell:
+    cmd: >
+      zcat /usr/share/zabbix-sql-scripts/postgresql/server.sql.gz
+      | psql -h {{ zabbix_db_host }} -U {{ zabbix_db_user }} {{ zabbix_db_name }}
+    creates: /var/lib/zabbix/.schema_imported
+  environment:
+    PGPASSWORD: "{{ vault_zabbix_db_pass }}"
+  register: schema_import
+
+- name: "Mark schema as imported"
+  ansible.builtin.file:
+    path: /var/lib/zabbix/.schema_imported
+    state: touch
+    mode: "0644"
+  when: schema_import.changed
+
+- name: "Configure Zabbix Nginx vhost"
+  ansible.builtin.template:
+    src: zabbix-nginx.conf.j2
+    dest: /etc/nginx/conf.d/zabbix.conf
+    mode: "0644"
+  notify: restart nginx
+
+- name: "Enable and start Zabbix services"
+  ansible.builtin.systemd:
+    name: "{{ item }}"
+    enabled: true
+    state: started
+  loop:
+    - zabbix-server
+    - zabbix-agent2
+    - nginx

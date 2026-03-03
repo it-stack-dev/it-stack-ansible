@@ -1,0 +1,16 @@
+﻿---
+# roles/suitecrm/handlers/main.yml
+
+- name: "restart nginx"
+  ansible.builtin.systemd:
+    name: nginx
+    state: restarted
+
+- name: "restart php8.3-fpm"
+  ansible.builtin.systemd:
+    name: php8.3-fpm
+    state: restarted
+
+- name: "reload systemd"
+  ansible.builtin.systemd:
+    daemon_reload: true

@@ -1,0 +1,10 @@
+﻿---
+# tasks/main.yml - graylog
+
+- name: "Import graylog installation tasks"
+  ansible.builtin.import_tasks: install.yml
+  tags: [graylog, install]
+
+- name: "Import graylog configuration tasks"
+  ansible.builtin.import_tasks: configure.yml
+  tags: [graylog, configure]

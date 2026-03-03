@@ -1,0 +1,19 @@
+﻿[Unit]
+Description=Taiga Backend (Django Gunicorn)
+After=network.target postgresql.service redis.service
+
+[Service]
+Type=simple
+User={{ taiga_user }}
+Group={{ taiga_group }}
+WorkingDirectory={{ taiga_install_dir }}/back
+ExecStart={{ taiga_install_dir }}/venv/bin/gunicorn \
+    --workers {{ taiga_django_workers }} \
+    --bind 127.0.0.1:{{ taiga_backend_port }} \
+    --log-file {{ taiga_log_dir }}/gunicorn.log \
+    taiga.wsgi:application
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

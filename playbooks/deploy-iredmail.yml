@@ -1,0 +1,56 @@
+---
+# playbooks/deploy-iredmail.yml
+# Deploy and configure iRedMail on lab-comm1.
+# Run with: make deploy-iredmail
+#
+# Prerequisites:
+#   - Phase 1 complete; reverse DNS (PTR) configured for 10.0.50.14
+#   - vault/secrets.yml contains: vault_iredmail_admin_pass, vault_pg_iredmail_pass
+#   - IMPORTANT: iRedMail installer must be run once manually; this role configures it
+
+- name: "Deploy iRedMail Email Server"
+  hosts: communications
+  gather_facts: true
+  vars_files:
+    - ../vault/secrets.yml
+
+  pre_tasks:
+    - name: "Assert iRedMail vault vars present"
+      ansible.builtin.assert:
+        that:
+          - vault_iredmail_admin_pass is defined
+          - vault_pg_iredmail_pass is defined
+        fail_msg: "Missing iRedMail vault variables in vault/secrets.yml"
+
+  roles:
+    - role: common
+      tags: [common]
+    - role: iredmail
+      tags: [iredmail, communications, email]
+
+  post_tasks:
+    - name: "Verify Postfix SMTP port listening"
+      ansible.builtin.wait_for:
+        port: "{{ iredmail_smtp_port }}"
+        host: localhost
+        timeout: 30
+      ignore_errors: true
+      tags: [verify]
+
+    - name: "Verify Dovecot IMAPS port listening"
+      ansible.builtin.wait_for:
+        port: "{{ iredmail_imap_port }}"
+        host: localhost
+        timeout: 30
+      ignore_errors: true
+      tags: [verify]
+
+    - name: "Display iRedMail deployment summary"
+      ansible.builtin.debug:
+        msg:
+          - "iRedMail deployed on {{ inventory_hostname }}"
+          - "Mail domain: {{ iredmail_domain }}"
+          - "SMTP ports: 25, {{ iredmail_smtp_port }}"
+          - "IMAP: {{ iredmail_imap_port }}"
+          - "Admin console: https://mail.{{ it_stack_domain }}/iredadmin"
+      tags: [verify]

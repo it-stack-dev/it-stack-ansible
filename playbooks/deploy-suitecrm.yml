@@ -1,0 +1,49 @@
+---
+# playbooks/deploy-suitecrm.yml
+# Deploy and configure SuiteCRM on lab-biz1.
+# Run with: make deploy-suitecrm
+#
+# Prerequisites:
+#   - Phase 1 complete; iRedMail for email campaigns
+#   - vault/secrets.yml contains: vault_pg_suitecrm_pass, vault_suitecrm_admin_pass
+
+- name: "Deploy SuiteCRM Customer Relationship Management"
+  hosts: business
+  gather_facts: true
+  vars_files:
+    - ../vault/secrets.yml
+
+  pre_tasks:
+    - name: "Assert SuiteCRM vault vars present"
+      ansible.builtin.assert:
+        that:
+          - vault_pg_suitecrm_pass is defined
+          - vault_suitecrm_admin_pass is defined
+        fail_msg: "Missing SuiteCRM vault variables in vault/secrets.yml"
+
+  roles:
+    - role: common
+      tags: [common]
+    - role: suitecrm
+      tags: [suitecrm, business, crm]
+
+  post_tasks:
+    - name: "Verify SuiteCRM HTTP response"
+      ansible.builtin.uri:
+        url: "http://localhost/"
+        return_content: false
+        status_code: 200
+        follow_redirects: all
+      register: crm_status
+      ignore_errors: true
+      tags: [verify]
+
+    - name: "Display SuiteCRM deployment summary"
+      ansible.builtin.debug:
+        msg:
+          - "SuiteCRM {{ suitecrm_version }} deployed on {{ inventory_hostname }}"
+          - "URL: {{ suitecrm_site_url }}"
+          - "Admin: {{ suitecrm_admin_user }}"
+          - "Install dir: {{ suitecrm_install_dir }}"
+          - "DB: {{ suitecrm_db_host }} / {{ suitecrm_db_name }}"
+      tags: [verify]

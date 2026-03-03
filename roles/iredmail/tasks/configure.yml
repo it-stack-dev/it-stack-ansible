@@ -1,0 +1,47 @@
+﻿---
+# roles/iredmail/tasks/configure.yml
+
+- name: "Deploy Postfix main.cf"
+  ansible.builtin.template:
+    src: postfix-main.cf.j2
+    dest: /etc/postfix/main.cf
+    mode: "0644"
+  notify: restart postfix
+
+- name: "Deploy Postfix PostgreSQL lookup tables"
+  ansible.builtin.template:
+    src: "{{ item }}.j2"
+    dest: "/etc/postfix/{{ item }}"
+    mode: "0640"
+    owner: root
+    group: postfix
+  loop:
+    - pgsql-virtual-mailbox-domains.cf
+    - pgsql-virtual-mailbox-users.cf
+    - pgsql-virtual-alias-maps.cf
+  notify: restart postfix
+
+- name: "Deploy Dovecot configuration"
+  ansible.builtin.template:
+    src: dovecot.conf.j2
+    dest: /etc/dovecot/dovecot.conf
+    mode: "0644"
+  notify: restart dovecot
+
+- name: "Enable and start mail services"
+  ansible.builtin.systemd:
+    name: "{{ item }}"
+    enabled: true
+    state: started
+  loop:
+    - postfix
+    - dovecot
+    - amavis
+    - clamav-daemon
+
+- name: "Update ClamAV virus database"
+  ansible.builtin.command:
+    cmd: freshclam
+  register: freshclam_result
+  failed_when: freshclam_result.rc != 0 and "locked" not in freshclam_result.stderr
+  changed_when: freshclam_result.rc == 0

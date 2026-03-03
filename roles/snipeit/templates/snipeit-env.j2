@@ -1,0 +1,26 @@
+﻿APP_NAME="{{ snipeit_app_name }}"
+APP_ENV=production
+APP_KEY=
+APP_DEBUG=false
+APP_URL=https://{{ snipeit_hostname }}
+
+DB_CONNECTION=mysql
+DB_HOST={{ snipeit_db_host }}
+DB_PORT={{ snipeit_db_port }}
+DB_DATABASE={{ snipeit_db_name }}
+DB_USERNAME={{ snipeit_db_user }}
+DB_PASSWORD={{ vault_snipeit_db_pass }}
+
+SESSION_DRIVER={{ 'redis' if snipeit_redis_host is defined else 'file' }}
+CACHE_DRIVER={{ 'redis' if snipeit_redis_host is defined else 'file' }}
+QUEUE_CONNECTION={{ 'redis' if snipeit_redis_host is defined else 'sync' }}
+
+REDIS_HOST={{ snipeit_redis_host }}
+REDIS_PORT={{ snipeit_redis_port }}
+
+MAIL_MAILER=smtp
+MAIL_HOST={{ snipeit_smtp_host }}
+MAIL_PORT={{ snipeit_smtp_port }}
+MAIL_FROM_ADDRESS={{ snipeit_smtp_from }}
+
+SAML2_{{ snipeit_saml_client | upper }}_METADATA={{ snipeit_keycloak_url }}/realms/{{ snipeit_keycloak_realm }}/protocol/saml/descriptor

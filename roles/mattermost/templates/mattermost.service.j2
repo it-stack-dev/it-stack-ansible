@@ -1,0 +1,16 @@
+﻿[Unit]
+Description=Mattermost Team Messaging
+After=network.target postgresql.service
+
+[Service]
+Type=notify
+User={{ mattermost_user }}
+Group={{ mattermost_group }}
+ExecStart={{ mattermost_install_dir }}/current/bin/mattermost
+WorkingDirectory={{ mattermost_install_dir }}/current
+Restart=always
+RestartSec=10
+LimitNOFILE=49152
+
+[Install]
+WantedBy=multi-user.target

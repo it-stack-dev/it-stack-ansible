@@ -1,0 +1,25 @@
+---
+# inventory/host_vars/lab-app1.yml
+# Collaboration server â€” Nextcloud + Mattermost + Jitsi
+ansible_host:           "10.0.50.13"
+server_role:            "collaboration"
+server_description:     "Nextcloud + Mattermost + Jitsi Meet"
+server_ram_gb:          24
+server_vcpus:           8
+server_disk_gb:         500
+
+# PHP-FPM pool settings tuned for 24 GB RAM
+php_fpm_pm:             "dynamic"
+php_fpm_max_children:   50
+php_fpm_start_servers:  10
+php_fpm_min_spare:      5
+php_fpm_max_spare:      20
+php_memory_limit:       "1024M"
+
+# UFW rules specific to this host
+ufw_allow_ports:
+  - { port: 80,    proto: tcp, comment: "HTTP" }
+  - { port: 443,   proto: tcp, comment: "HTTPS" }
+  - { port: 8065,  proto: tcp, comment: "Mattermost" }
+  - { port: 10000, proto: udp, comment: "Jitsi WebRTC" }
+  - { port: 4443,  proto: tcp, comment: "Jitsi Harvester" }

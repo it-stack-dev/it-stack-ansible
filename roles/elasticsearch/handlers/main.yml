@@ -1,0 +1,11 @@
+﻿---
+# roles/elasticsearch/handlers/main.yml
+
+- name: "restart elasticsearch"
+  ansible.builtin.systemd:
+    name: elasticsearch
+    state: restarted
+
+- name: "reload systemd"
+  ansible.builtin.systemd:
+    daemon_reload: true

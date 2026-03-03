@@ -1,0 +1,32 @@
+---
+# roles/elasticsearch/defaults/main.yml
+
+elasticsearch_version:      "8.13.0"
+elasticsearch_install_dir:  "/usr/share/elasticsearch"
+elasticsearch_data_dir:     "/var/lib/elasticsearch"
+elasticsearch_log_dir:      "/var/log/elasticsearch"
+elasticsearch_config_dir:   "/etc/elasticsearch"
+elasticsearch_user:         "elasticsearch"
+elasticsearch_group:        "elasticsearch"
+
+elasticsearch_http_port:    9200
+elasticsearch_transport_port: 9300
+elasticsearch_hostname:     "10.0.50.12"
+elasticsearch_cluster_name: "it-stack"
+elasticsearch_node_name:    "lab-db1"
+
+elasticsearch_heap_size:    "4g"
+elasticsearch_heap_min:     "4g"
+
+elasticsearch_discovery_type: "single-node"
+elasticsearch_xpack_security: true
+
+elasticsearch_indices:
+  - "zammad-*"
+  - "logstash-*"
+  - "graylog_*"
+  - "kibana_*"
+
+elasticsearch_firewall_ports:
+  - { port: "9200", proto: tcp, from: "10.0.50.0/24" }
+  - { port: "9300", proto: tcp, from: "10.0.50.0/24" }

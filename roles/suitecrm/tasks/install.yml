@@ -1,0 +1,71 @@
+﻿---
+# roles/suitecrm/tasks/install.yml
+
+- name: "Install PHP 8.3 and required extensions for SuiteCRM"
+  ansible.builtin.apt:
+    name:
+      - php8.3
+      - php8.3-fpm
+      - php8.3-gd
+      - php8.3-curl
+      - php8.3-zip
+      - php8.3-xml
+      - php8.3-mbstring
+      - php8.3-pgsql
+      - php8.3-intl
+      - php8.3-imap
+      - php8.3-soap
+      - php8.3-redis
+      - php8.3-opcache
+      - nginx
+      - unzip
+    state: present
+    update_cache: true
+
+- name: "Create SuiteCRM install directory"
+  ansible.builtin.file:
+    path: "{{ suitecrm_install_dir }}"
+    state: directory
+    owner: "{{ suitecrm_user }}"
+    group: "{{ suitecrm_group }}"
+    mode: "0750"
+
+- name: "Check if SuiteCRM is installed"
+  ansible.builtin.stat:
+    path: "{{ suitecrm_install_dir }}/index.php"
+  register: scrm_installed
+
+- name: "Download SuiteCRM {{ suitecrm_version }}"
+  ansible.builtin.get_url:
+    url: "https://suitecrm.com/download/128/suite82/{{ suitecrm_version }}/SuiteCRM-{{ suitecrm_version }}.zip"
+    dest: "/tmp/suitecrm-{{ suitecrm_version }}.zip"
+    mode: "0644"
+  when: not scrm_installed.stat.exists
+
+- name: "Extract SuiteCRM archive"
+  ansible.builtin.unarchive:
+    src: "/tmp/suitecrm-{{ suitecrm_version }}.zip"
+    dest: "{{ suitecrm_install_dir }}"
+    remote_src: true
+    owner: "{{ suitecrm_user }}"
+    group: "{{ suitecrm_group }}"
+    extra_opts: [--strip-components=1]
+  when: not scrm_installed.stat.exists
+
+- name: "Set SuiteCRM directory permissions"
+  ansible.builtin.file:
+    path: "{{ suitecrm_install_dir }}"
+    owner: "{{ suitecrm_user }}"
+    group: "{{ suitecrm_group }}"
+    recurse: true
+    mode: "0755"
+
+- name: "Open SuiteCRM firewall ports"
+  community.general.ufw:
+    rule: allow
+    port: "{{ item.port | string }}"
+    proto: "{{ item.proto }}"
+    src: "{{ item.from }}"
+    comment: "SuiteCRM"
+  loop: "{{ suitecrm_firewall_ports }}"
+  tags: [firewall]

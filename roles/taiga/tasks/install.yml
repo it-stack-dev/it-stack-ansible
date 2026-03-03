@@ -1,0 +1,110 @@
+﻿---
+# roles/taiga/tasks/install.yml
+
+- name: "Add deadsnakes Python 3.12 PPA"
+  ansible.builtin.apt_repository:
+    repo: "ppa:deadsnakes/ppa"
+    state: present
+    update_cache: true
+
+- name: "Install Python 3.12 and build dependencies"
+  ansible.builtin.apt:
+    name:
+      - python3.12
+      - python3.12-venv
+      - python3.12-dev
+      - python3-pip
+      - build-essential
+      - libpq-dev
+      - libxml2-dev
+      - libxslt1-dev
+      - libffi-dev
+      - libjpeg-dev
+      - nginx
+      - git
+    state: present
+
+- name: "Create Taiga system group"
+  ansible.builtin.group:
+    name: "{{ taiga_group }}"
+    state: present
+    system: true
+
+- name: "Create Taiga system user"
+  ansible.builtin.user:
+    name: "{{ taiga_user }}"
+    group: "{{ taiga_group }}"
+    home: "{{ taiga_install_dir }}"
+    shell: /usr/sbin/nologin
+    system: true
+
+- name: "Create Taiga directories"
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: "{{ taiga_user }}"
+    group: "{{ taiga_group }}"
+    mode: "0750"
+  loop:
+    - "{{ taiga_install_dir }}"
+    - "{{ taiga_install_dir }}/back"
+    - "{{ taiga_install_dir }}/front"
+    - "{{ taiga_install_dir }}/media"
+    - "{{ taiga_install_dir }}/static"
+    - "{{ taiga_log_dir }}"
+
+- name: "Clone taiga-back"
+  ansible.builtin.git:
+    repo: "https://github.com/taigaio/taiga-back.git"
+    dest: "{{ taiga_install_dir }}/back"
+    version: "{{ taiga_version }}"
+    force: false
+  become: true
+  become_user: "{{ taiga_user }}"
+
+- name: "Create Python virtualenv and install taiga-back requirements"
+  ansible.builtin.pip:
+    requirements: "{{ taiga_install_dir }}/back/requirements.txt"
+    virtualenv: "{{ taiga_install_dir }}/venv"
+    virtualenv_python: python3.12
+  become: true
+  become_user: "{{ taiga_user }}"
+
+- name: "Download taiga-front-dist"
+  ansible.builtin.get_url:
+    url: "https://github.com/taigaio/taiga-front-dist/archive/refs/tags/{{ taiga_version }}-stable.tar.gz"
+    dest: "/tmp/taiga-front-{{ taiga_version }}.tar.gz"
+    mode: "0644"
+
+- name: "Extract taiga-front-dist"
+  ansible.builtin.unarchive:
+    src: "/tmp/taiga-front-{{ taiga_version }}.tar.gz"
+    dest: "{{ taiga_install_dir }}/front"
+    remote_src: true
+    owner: "{{ taiga_user }}"
+    group: "{{ taiga_group }}"
+    extra_opts: [--strip-components=1]
+
+- name: "Deploy Taiga backend systemd service"
+  ansible.builtin.template:
+    src: taiga-backend.service.j2
+    dest: /etc/systemd/system/taiga-backend.service
+    mode: "0644"
+  notify: reload systemd
+
+- name: "Deploy Taiga async worker systemd service"
+  ansible.builtin.template:
+    src: taiga-async.service.j2
+    dest: /etc/systemd/system/taiga-async.service
+    mode: "0644"
+  notify: reload systemd
+
+- name: "Open Taiga firewall ports"
+  community.general.ufw:
+    rule: allow
+    port: "{{ item.port | string }}"
+    proto: "{{ item.proto }}"
+    src: "{{ item.from }}"
+    comment: "Taiga"
+  loop: "{{ taiga_firewall_ports }}"
+  tags: [firewall]

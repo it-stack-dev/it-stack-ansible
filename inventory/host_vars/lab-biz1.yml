@@ -1,0 +1,23 @@
+---
+# inventory/host_vars/lab-biz1.yml
+# Business applications server â€” SuiteCRM + Odoo + OpenKM
+ansible_host:           "10.0.50.17"
+server_role:            "business"
+server_description:     "SuiteCRM (CRM) + Odoo (ERP) + OpenKM (DMS)"
+server_ram_gb:          24
+server_vcpus:           8
+server_disk_gb:         500
+
+php_fpm_pm:             "dynamic"
+php_fpm_max_children:   30
+php_fpm_start_servers:  5
+php_fpm_min_spare:      3
+php_fpm_max_spare:      10
+php_memory_limit:       "768M"
+
+ufw_allow_ports:
+  - { port: 80,    proto: tcp, comment: "HTTP" }
+  - { port: 443,   proto: tcp, comment: "HTTPS" }
+  - { port: 8069,  proto: tcp, comment: "Odoo HTTP" }
+  - { port: 8072,  proto: tcp, comment: "Odoo Longpolling" }
+  - { port: 8080,  proto: tcp, comment: "OpenKM" }

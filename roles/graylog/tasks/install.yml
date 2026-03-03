@@ -1,0 +1,64 @@
+﻿---
+# roles/graylog/tasks/install.yml
+
+- name: "Install MongoDB prerequisites"
+  ansible.builtin.apt:
+    name:
+      - gnupg
+      - wget
+      - curl
+    state: present
+
+- name: "Add MongoDB apt signing key"
+  ansible.builtin.get_url:
+    url: "https://pgp.mongodb.com/server-7.0.asc"
+    dest: /etc/apt/keyrings/mongodb.gpg
+    mode: "0644"
+
+- name: "Add MongoDB 7.0 apt repository"
+  ansible.builtin.apt_repository:
+    repo: "deb [arch=amd64,arm64 signed-by=/etc/apt/keyrings/mongodb.gpg] https://repo.mongodb.org/apt/ubuntu jammy/mongodb-org/7.0 multiverse"
+    filename: mongodb-org-7.0
+    state: present
+    update_cache: true
+
+- name: "Install MongoDB"
+  ansible.builtin.apt:
+    name: mongodb-org
+    state: present
+
+- name: "Enable and start MongoDB"
+  ansible.builtin.systemd:
+    name: mongod
+    enabled: true
+    state: started
+
+- name: "Add Graylog apt signing key"
+  ansible.builtin.get_url:
+    url: "https://downloads.graylog.org/repo/packages/graylog-6.0-repository_latest.deb"
+    dest: /tmp/graylog-repo.deb
+    mode: "0644"
+
+- name: "Install Graylog apt repository"
+  ansible.builtin.apt:
+    deb: /tmp/graylog-repo.deb
+    state: present
+
+- name: "Update apt cache after adding Graylog repo"
+  ansible.builtin.apt:
+    update_cache: true
+
+- name: "Install Graylog server"
+  ansible.builtin.apt:
+    name: graylog-server
+    state: present
+
+- name: "Open Graylog firewall ports"
+  community.general.ufw:
+    rule: allow
+    port: "{{ item.port | string }}"
+    proto: "{{ item.proto }}"
+    src: "{{ item.from }}"
+    comment: "Graylog"
+  loop: "{{ graylog_firewall_ports }}"
+  tags: [firewall]

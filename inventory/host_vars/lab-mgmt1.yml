@@ -1,0 +1,22 @@
+---
+# inventory/host_vars/lab-mgmt1.yml
+# IT Management server â€” Taiga + Snipe-IT + GLPI
+ansible_host:           "10.0.50.18"
+server_role:            "it_management"
+server_description:     "Taiga (Projects) + Snipe-IT (Assets) + GLPI (ITSM)"
+server_ram_gb:          16
+server_vcpus:           6
+server_disk_gb:         200
+
+php_fpm_pm:             "dynamic"
+php_fpm_max_children:   30
+php_fpm_start_servers:  5
+php_fpm_min_spare:      3
+php_fpm_max_spare:      10
+php_memory_limit:       "512M"
+
+ufw_allow_ports:
+  - { port: 80,    proto: tcp, comment: "HTTP" }
+  - { port: 443,   proto: tcp, comment: "HTTPS" }
+  - { port: 8001,  proto: tcp, comment: "Taiga Backend" }
+  - { port: 8888,  proto: tcp, comment: "Taiga Events" }

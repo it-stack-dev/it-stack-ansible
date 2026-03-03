@@ -1,0 +1,49 @@
+---
+# playbooks/deploy-taiga.yml
+# Deploy and configure Taiga Project Management on lab-mgmt1.
+# Run with: make deploy-taiga
+#
+# Prerequisites:
+#   - Phase 1 complete; Keycloak for SSO LDAP integration
+#   - vault/secrets.yml contains: vault_pg_taiga_pass, vault_taiga_secret_key, vault_taiga_admin_pass
+
+- name: "Deploy Taiga Project Management Platform"
+  hosts: it_management
+  gather_facts: true
+  vars_files:
+    - ../vault/secrets.yml
+
+  pre_tasks:
+    - name: "Assert Taiga vault vars present"
+      ansible.builtin.assert:
+        that:
+          - vault_pg_taiga_pass is defined
+          - vault_taiga_secret_key is defined
+          - vault_taiga_admin_pass is defined
+        fail_msg: "Missing Taiga vault variables in vault/secrets.yml"
+
+  roles:
+    - role: common
+      tags: [common]
+    - role: taiga
+      tags: [taiga, it-management, projects]
+
+  post_tasks:
+    - name: "Verify Taiga backend API health"
+      ansible.builtin.uri:
+        url: "http://localhost:{{ taiga_backend_port }}/api/v1/"
+        return_content: true
+        status_code: 200
+      register: taiga_health
+      ignore_errors: true
+      tags: [verify]
+
+    - name: "Display Taiga deployment summary"
+      ansible.builtin.debug:
+        msg:
+          - "Taiga {{ taiga_version }} deployed on {{ inventory_hostname }}"
+          - "URL: {{ taiga_site_url }}"
+          - "Backend port: {{ taiga_backend_port }}"
+          - "Events port: {{ taiga_events_port }}"
+          - "LDAP: {{ taiga_ldap_server }}"
+      tags: [verify]

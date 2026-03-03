@@ -1,0 +1,79 @@
+﻿---
+# roles/nextcloud/tasks/install.yml
+
+- name: "Add PHP 8.3 apt repository (Ondrej)"
+  ansible.builtin.apt_repository:
+    repo: "ppa:ondrej/php"
+    state: present
+    update_cache: true
+
+- name: "Install PHP 8.3 and required extensions"
+  ansible.builtin.apt:
+    name:
+      - php8.3
+      - php8.3-fpm
+      - php8.3-gd
+      - php8.3-curl
+      - php8.3-zip
+      - php8.3-xml
+      - php8.3-mbstring
+      - php8.3-pgsql
+      - php8.3-intl
+      - php8.3-bcmath
+      - php8.3-gmp
+      - php8.3-imagick
+      - php8.3-redis
+      - php8.3-opcache
+      - nginx
+      - redis-tools
+    state: present
+
+- name: "Create Nextcloud directories"
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: "{{ nextcloud_user }}"
+    group: "{{ nextcloud_group }}"
+    mode: "0750"
+  loop:
+    - "{{ nextcloud_install_dir }}"
+    - "{{ nextcloud_data_dir }}"
+    - "{{ nextcloud_log_dir }}"
+
+- name: "Check if Nextcloud is already installed"
+  ansible.builtin.stat:
+    path: "{{ nextcloud_install_dir }}/version.php"
+  register: nc_installed
+
+- name: "Download Nextcloud {{ nextcloud_version }}"
+  ansible.builtin.get_url:
+    url: "https://download.nextcloud.com/server/releases/nextcloud-{{ nextcloud_version }}.tar.bz2"
+    dest: "/tmp/nextcloud-{{ nextcloud_version }}.tar.bz2"
+    mode: "0644"
+  when: not nc_installed.stat.exists
+
+- name: "Extract Nextcloud archive"
+  ansible.builtin.unarchive:
+    src: "/tmp/nextcloud-{{ nextcloud_version }}.tar.bz2"
+    dest: /var/www
+    remote_src: true
+    owner: "{{ nextcloud_user }}"
+    group: "{{ nextcloud_group }}"
+  when: not nc_installed.stat.exists
+
+- name: "Set Nextcloud directory permissions"
+  ansible.builtin.file:
+    path: "{{ nextcloud_install_dir }}"
+    owner: "{{ nextcloud_user }}"
+    group: "{{ nextcloud_group }}"
+    recurse: true
+
+- name: "Open Nextcloud firewall ports"
+  community.general.ufw:
+    rule: allow
+    port: "{{ item.port | string }}"
+    proto: "{{ item.proto }}"
+    src: "{{ item.from }}"
+    comment: "Nextcloud"
+  loop: "{{ nextcloud_firewall_ports }}"
+  tags: [firewall]

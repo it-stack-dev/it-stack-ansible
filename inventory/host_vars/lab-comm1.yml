@@ -1,0 +1,20 @@
+---
+# inventory/host_vars/lab-comm1.yml
+# Communications server â€” iRedMail + Zammad + Zabbix
+ansible_host:           "10.0.50.14"
+server_role:            "communications"
+server_description:     "iRedMail + Zammad Help Desk + Zabbix Monitoring"
+server_ram_gb:          16
+server_vcpus:           6
+server_disk_gb:         200
+
+ufw_allow_ports:
+  - { port: 25,    proto: tcp, comment: "SMTP" }
+  - { port: 143,   proto: tcp, comment: "IMAP" }
+  - { port: 993,   proto: tcp, comment: "IMAPS" }
+  - { port: 465,   proto: tcp, comment: "SMTPS" }
+  - { port: 587,   proto: tcp, comment: "Submission" }
+  - { port: 80,    proto: tcp, comment: "HTTP" }
+  - { port: 443,   proto: tcp, comment: "HTTPS" }
+  - { port: 3000,  proto: tcp, comment: "Zammad" }
+  - { port: 10051, proto: tcp, comment: "Zabbix Server" }

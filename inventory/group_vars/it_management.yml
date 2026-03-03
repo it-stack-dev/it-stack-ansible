@@ -1,0 +1,46 @@
+---
+# ============================================================
+# IT Management Server Variables (lab-mgmt1 - 10.0.50.18)
+# inventory/group_vars/it_management.yml
+# ============================================================
+
+# â”€â”€ Taiga â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+taiga_version:              "6.8"
+taiga_install_dir:          "/opt/taiga"
+taiga_backend_dir:          "/opt/taiga/taiga-back"
+taiga_frontend_dir:         "/opt/taiga/taiga-front"
+taiga_db_host:              "10.0.50.12"
+taiga_db_name:              "taiga"
+taiga_db_user:              "taiga"
+taiga_site_url:             "https://pm.{{ it_stack_domain }}"
+taiga_backend_port:         8001
+taiga_events_port:          8888
+taiga_secret_key:           "{{ vault_taiga_secret_key }}"
+taiga_enable_github_auth:   false
+taiga_enable_ldap:          true
+taiga_ldap_server:          "ldap://10.0.50.11"
+
+# â”€â”€ Snipe-IT â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+snipeit_version:            "7.0"
+snipeit_install_dir:        "/var/www/snipeit"
+snipeit_db_host:            "10.0.50.12"
+snipeit_db_name:            "snipeit"
+snipeit_db_user:            "snipeit"
+snipeit_app_url:            "https://assets.{{ it_stack_domain }}"
+snipeit_app_port:           80
+snipeit_mail_host:          "mail.{{ it_stack_domain }}"
+snipeit_mail_port:          587
+snipeit_mail_from:          "assets@{{ it_stack_domain }}"
+snipeit_php_version:        "8.2"
+
+# â”€â”€ GLPI â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+glpi_version:               "10.0.14"
+glpi_install_dir:           "/var/www/glpi"
+glpi_files_dir:             "/srv/glpi/files"
+glpi_db_host:               "10.0.50.12"
+glpi_db_name:               "glpi"
+glpi_db_user:               "glpi"
+glpi_site_url:              "https://itsm.{{ it_stack_domain }}"
+glpi_port:                  80
+glpi_admin_email:           "itsm@{{ it_stack_domain }}"
+glpi_cron_interval:         "*/5 * * * *"

@@ -1,0 +1,10 @@
+﻿---
+# tasks/main.yml - elasticsearch
+
+- name: "Import elasticsearch installation tasks"
+  ansible.builtin.import_tasks: install.yml
+  tags: [elasticsearch, install]
+
+- name: "Import elasticsearch configuration tasks"
+  ansible.builtin.import_tasks: configure.yml
+  tags: [elasticsearch, configure]

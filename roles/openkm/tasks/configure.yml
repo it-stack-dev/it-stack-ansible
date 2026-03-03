@@ -1,0 +1,26 @@
+﻿---
+# roles/openkm/tasks/configure.yml
+
+- name: "Deploy OpenKM datasource configuration"
+  ansible.builtin.template:
+    src: openkm-datasource.xml.j2
+    dest: "{{ openkm_install_dir }}/conf/database.xml"
+    owner: "{{ openkm_user }}"
+    group: "{{ openkm_group }}"
+    mode: "0640"
+  notify: restart openkm
+
+- name: "Enable and start OpenKM"
+  ansible.builtin.systemd:
+    name: openkm
+    enabled: true
+    state: started
+
+- name: "Wait for OpenKM application server"
+  ansible.builtin.uri:
+    url: "http://localhost:{{ openkm_http_port }}/OpenKM"
+    status_code: [200, 302]
+  register: okm_health
+  retries: 18
+  delay: 15
+  until: okm_health.status in [200, 302]

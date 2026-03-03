@@ -1,0 +1,21 @@
+﻿---
+# roles/iredmail/handlers/main.yml
+
+- name: "restart postfix"
+  ansible.builtin.systemd:
+    name: postfix
+    state: restarted
+
+- name: "restart dovecot"
+  ansible.builtin.systemd:
+    name: dovecot
+    state: restarted
+
+- name: "restart amavis"
+  ansible.builtin.systemd:
+    name: amavis
+    state: restarted
+
+- name: "reload systemd"
+  ansible.builtin.systemd:
+    daemon_reload: true

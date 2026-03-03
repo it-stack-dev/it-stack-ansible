@@ -1,0 +1,10 @@
+﻿---
+# tasks/main.yml - zammad
+
+- name: "Import zammad installation tasks"
+  ansible.builtin.import_tasks: install.yml
+  tags: [zammad, install]
+
+- name: "Import zammad configuration tasks"
+  ansible.builtin.import_tasks: configure.yml
+  tags: [zammad, configure]

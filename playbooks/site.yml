@@ -65,3 +65,152 @@
   roles:
     - role: traefik
       tags: [infrastructure, traefik]
+
+# ============================================================
+# Phase 2: Collaboration
+# Dependency order: nextcloud → mattermost → jitsi
+#   (Elasticsearch must be up before Zammad in Phase 3)
+# ============================================================
+
+- name: "Phase 2.0 — Elasticsearch search & analytics engine"
+  hosts: database
+  gather_facts: true
+  vars_files:
+    - ../vault/secrets.yml
+  roles:
+    - role: elasticsearch
+      tags: [database, elasticsearch]
+
+- name: "Phase 2.1 — Nextcloud file sharing & collaboration"
+  hosts: collaboration
+  gather_facts: true
+  vars_files:
+    - ../vault/secrets.yml
+  roles:
+    - role: nextcloud
+      tags: [collaboration, nextcloud]
+
+- name: "Phase 2.2 — Mattermost team messaging"
+  hosts: collaboration
+  gather_facts: true
+  vars_files:
+    - ../vault/secrets.yml
+  roles:
+    - role: mattermost
+      tags: [collaboration, mattermost]
+
+- name: "Phase 2.3 — Jitsi Meet video conferencing"
+  hosts: collaboration
+  gather_facts: true
+  vars_files:
+    - ../vault/secrets.yml
+  roles:
+    - role: jitsi
+      tags: [collaboration, jitsi]
+
+- name: "Phase 2.4 — iRedMail email server"
+  hosts: communications
+  gather_facts: true
+  vars_files:
+    - ../vault/secrets.yml
+  roles:
+    - role: iredmail
+      tags: [communications, iredmail, email]
+
+- name: "Phase 2.5 — Zammad help desk"
+  hosts: communications
+  gather_facts: true
+  vars_files:
+    - ../vault/secrets.yml
+  roles:
+    - role: zammad
+      tags: [communications, zammad, helpdesk]
+
+# ============================================================
+# Phase 3: Back Office
+# ============================================================
+
+- name: "Phase 3.0 — FreePBX VoIP PBX"
+  hosts: communications
+  gather_facts: true
+  vars_files:
+    - ../vault/secrets.yml
+  roles:
+    - role: freepbx
+      tags: [voip, freepbx, communications]
+
+- name: "Phase 3.1 — SuiteCRM customer relationship management"
+  hosts: business
+  gather_facts: true
+  vars_files:
+    - ../vault/secrets.yml
+  roles:
+    - role: suitecrm
+      tags: [business, suitecrm, crm]
+
+- name: "Phase 3.2 — Odoo ERP platform"
+  hosts: business
+  gather_facts: true
+  vars_files:
+    - ../vault/secrets.yml
+  roles:
+    - role: odoo
+      tags: [business, odoo, erp]
+
+- name: "Phase 3.3 — OpenKM document management system"
+  hosts: business
+  gather_facts: true
+  vars_files:
+    - ../vault/secrets.yml
+  roles:
+    - role: openkm
+      tags: [business, openkm, dms]
+
+# ============================================================
+# Phase 4: IT Management & Observability
+# ============================================================
+
+- name: "Phase 4.0 — Taiga project management"
+  hosts: it_management
+  gather_facts: true
+  vars_files:
+    - ../vault/secrets.yml
+  roles:
+    - role: taiga
+      tags: [it-management, taiga, projects]
+
+- name: "Phase 4.1 — Snipe-IT asset management"
+  hosts: it_management
+  gather_facts: true
+  vars_files:
+    - ../vault/secrets.yml
+  roles:
+    - role: snipeit
+      tags: [it-management, snipeit, assets]
+
+- name: "Phase 4.2 — GLPI IT service management"
+  hosts: it_management
+  gather_facts: true
+  vars_files:
+    - ../vault/secrets.yml
+  roles:
+    - role: glpi
+      tags: [it-management, glpi, itsm]
+
+- name: "Phase 4.3 — Zabbix infrastructure monitoring"
+  hosts: communications
+  gather_facts: true
+  vars_files:
+    - ../vault/secrets.yml
+  roles:
+    - role: zabbix
+      tags: [monitoring, zabbix, infrastructure]
+
+- name: "Phase 4.4 — Graylog centralized log management"
+  hosts: infrastructure
+  gather_facts: true
+  vars_files:
+    - ../vault/secrets.yml
+  roles:
+    - role: graylog
+      tags: [logging, graylog, infrastructure]

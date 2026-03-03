@@ -1,0 +1,10 @@
+﻿---
+# tasks/main.yml - iredmail
+
+- name: "Import iredmail installation tasks"
+  ansible.builtin.import_tasks: install.yml
+  tags: [iredmail, install]
+
+- name: "Import iredmail configuration tasks"
+  ansible.builtin.import_tasks: configure.yml
+  tags: [iredmail, configure]

@@ -1,0 +1,11 @@
+﻿---
+# roles/openkm/handlers/main.yml
+
+- name: "restart openkm"
+  ansible.builtin.systemd:
+    name: openkm
+    state: restarted
+
+- name: "reload systemd"
+  ansible.builtin.systemd:
+    daemon_reload: true

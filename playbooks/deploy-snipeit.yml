@@ -1,0 +1,50 @@
+---
+# playbooks/deploy-snipeit.yml
+# Deploy and configure Snipe-IT Asset Management on lab-mgmt1.
+# Run with: make deploy-snipeit
+#
+# Prerequisites:
+#   - Phase 1 complete; iRedMail for email notifications
+#   - vault/secrets.yml contains: vault_pg_snipeit_pass, vault_snipeit_app_key, vault_snipeit_admin_pass
+
+- name: "Deploy Snipe-IT Asset Management"
+  hosts: it_management
+  gather_facts: true
+  vars_files:
+    - ../vault/secrets.yml
+
+  pre_tasks:
+    - name: "Assert Snipe-IT vault vars present"
+      ansible.builtin.assert:
+        that:
+          - vault_pg_snipeit_pass is defined
+          - vault_snipeit_app_key is defined
+          - vault_snipeit_admin_pass is defined
+        fail_msg: "Missing Snipe-IT vault variables in vault/secrets.yml"
+
+  roles:
+    - role: common
+      tags: [common]
+    - role: snipeit
+      tags: [snipeit, it-management, assets]
+
+  post_tasks:
+    - name: "Verify Snipe-IT HTTP response"
+      ansible.builtin.uri:
+        url: "http://localhost/"
+        return_content: false
+        status_code: 200
+        follow_redirects: all
+      register: snipeit_status
+      ignore_errors: true
+      tags: [verify]
+
+    - name: "Display Snipe-IT deployment summary"
+      ansible.builtin.debug:
+        msg:
+          - "Snipe-IT {{ snipeit_version }} deployed on {{ inventory_hostname }}"
+          - "URL: {{ snipeit_app_url }}"
+          - "Install dir: {{ snipeit_install_dir }}"
+          - "DB: {{ snipeit_db_host }} / {{ snipeit_db_name }}"
+          - "Mail: {{ snipeit_mail_host }}:{{ snipeit_mail_port }}"
+      tags: [verify]

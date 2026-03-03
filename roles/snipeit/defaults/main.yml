@@ -1,0 +1,37 @@
+﻿---
+# roles/snipeit/defaults/main.yml
+
+snipeit_version:          "7.0.13"
+snipeit_install_dir:      "/var/www/snipeit"
+snipeit_log_dir:          "/var/log/snipeit"
+snipeit_user:             "www-data"
+snipeit_group:            "www-data"
+
+snipeit_http_port:        80
+snipeit_https_port:       443
+snipeit_hostname:         "assets.example.com"
+
+snipeit_db_host:          "10.0.50.12"
+snipeit_db_port:          3306
+snipeit_db_name:          "snipeit"
+snipeit_db_user:          "snipeit"
+
+snipeit_redis_host:       "10.0.50.12"
+snipeit_redis_port:       6379
+
+snipeit_keycloak_url:     "https://id.example.com"
+snipeit_keycloak_realm:   "it-stack"
+snipeit_saml_client:      "snipeit"
+
+snipeit_php_memory_limit: "512M"
+snipeit_app_name:         "IT-Stack Assets"
+
+snipeit_smtp_host:        "10.0.50.14"
+snipeit_smtp_port:        25
+snipeit_smtp_from:        "assets@example.com"
+
+snipeit_odoo_api_url:     "http://10.0.50.17:8069"
+
+snipeit_firewall_ports:
+  - { port: "80",  proto: tcp, from: "10.0.50.0/24" }
+  - { port: "443", proto: tcp, from: "10.0.50.0/24" }

@@ -1,0 +1,34 @@
+﻿# templates/suitecrm-nginx.conf.j2
+
+server {
+    listen 80;
+    server_name {{ suitecrm_hostname }};
+    return 301 https://\System.Management.Automation.Internal.Host.InternalHost\;
+}
+
+server {
+    listen 443 ssl http2;
+    server_name {{ suitecrm_hostname }};
+
+    ssl_certificate     /etc/ssl/certs/it-stack.crt;
+    ssl_certificate_key /etc/ssl/private/it-stack.key;
+
+    root   {{ suitecrm_install_dir }};
+    index  index.php;
+
+    client_max_body_size {{ suitecrm_php_upload_max }};
+
+    location / {
+        try_files \ \/ /index.php?\;
+    }
+
+    location ~ \.php\$ {
+        include        fastcgi_params;
+        fastcgi_pass   unix:/run/php/php8.3-fpm-suitecrm.sock;
+        fastcgi_param  SCRIPT_FILENAME \\;
+        fastcgi_read_timeout 300;
+    }
+
+    location ~ /\. { deny all; }
+    location ~* \.(log|sql)\$ { deny all; }
+}

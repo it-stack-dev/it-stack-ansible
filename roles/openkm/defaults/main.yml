@@ -1,0 +1,34 @@
+﻿---
+# roles/openkm/defaults/main.yml
+
+openkm_version:           "6.3.12"
+openkm_install_dir:       "/opt/openkm"
+openkm_data_dir:          "/var/lib/openkm"
+openkm_log_dir:           "/var/log/openkm"
+openkm_user:              "openkm"
+openkm_group:             "openkm"
+
+openkm_http_port:         8080
+openkm_https_port:        8443
+openkm_hostname:          "docs.example.com"
+
+openkm_db_host:           "10.0.50.12"
+openkm_db_port:           5432
+openkm_db_name:           "openkm"
+openkm_db_user:           "openkm"
+
+openkm_elasticsearch_url: "http://10.0.50.12:9200"
+
+openkm_keycloak_url:      "https://id.example.com"
+openkm_keycloak_realm:    "it-stack"
+openkm_saml_client:       "openkm"
+
+openkm_java_opts:         "-Xms512m -Xmx2g"
+openkm_admin_user:        "okmAdmin"
+
+openkm_nextcloud_url:     "https://cloud.example.com"
+openkm_nextcloud_user:    "openkm-svc"
+
+openkm_firewall_ports:
+  - { port: "8080", proto: tcp, from: "10.0.50.0/24" }
+  - { port: "8443", proto: tcp, from: "10.0.50.0/24" }

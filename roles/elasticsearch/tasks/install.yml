@@ -1,0 +1,50 @@
+﻿---
+# roles/elasticsearch/tasks/install.yml
+
+- name: "Add Elasticsearch apt signing key"
+  ansible.builtin.get_url:
+    url: "https://artifacts.elastic.co/GPG-KEY-elasticsearch"
+    dest: /etc/apt/keyrings/elasticsearch.gpg
+    mode: "0644"
+
+- name: "Add Elasticsearch {{ elasticsearch_version.split('.')[0] }}.x apt repository"
+  ansible.builtin.apt_repository:
+    repo: "deb [signed-by=/etc/apt/keyrings/elasticsearch.gpg] https://artifacts.elastic.co/packages/{{ elasticsearch_version.split('.')[0] }}.x/apt stable main"
+    filename: elasticsearch
+    state: present
+    update_cache: true
+
+- name: "Install Elasticsearch {{ elasticsearch_version }}"
+  ansible.builtin.apt:
+    name: "elasticsearch={{ elasticsearch_version }}"
+    state: present
+
+- name: "Create Elasticsearch data and log directories"
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: "{{ elasticsearch_user }}"
+    group: "{{ elasticsearch_group }}"
+    mode: "0750"
+  loop:
+    - "{{ elasticsearch_data_dir }}"
+    - "{{ elasticsearch_log_dir }}"
+
+- name: "Pin Elasticsearch package version"
+  ansible.builtin.copy:
+    content: |
+      Package: elasticsearch
+      Pin: version {{ elasticsearch_version }}
+      Pin-Priority: 1001
+    dest: /etc/apt/preferences.d/elasticsearch
+    mode: "0644"
+
+- name: "Open Elasticsearch firewall ports"
+  community.general.ufw:
+    rule: allow
+    port: "{{ item.port | string }}"
+    proto: "{{ item.proto }}"
+    src: "{{ item.from }}"
+    comment: "Elasticsearch"
+  loop: "{{ elasticsearch_firewall_ports }}"
+  tags: [firewall]

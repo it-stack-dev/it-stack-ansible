@@ -1,0 +1,39 @@
+---
+# roles/nextcloud/defaults/main.yml
+
+nextcloud_version:        "28.0.4"
+nextcloud_install_dir:    "/var/www/nextcloud"
+nextcloud_data_dir:       "/var/lib/nextcloud/data"
+nextcloud_log_dir:        "/var/log/nextcloud"
+nextcloud_user:           "www-data"
+nextcloud_group:          "www-data"
+
+nextcloud_http_port:      80
+nextcloud_https_port:     443
+nextcloud_hostname:       "cloud.example.com"
+
+nextcloud_db_host:        "10.0.50.12"
+nextcloud_db_port:        5432
+nextcloud_db_name:        "nextcloud"
+nextcloud_db_user:        "nextcloud"
+nextcloud_admin_user:     "admin"
+
+nextcloud_php_memory_limit:       "1G"
+nextcloud_php_upload_max:         "16G"
+nextcloud_php_post_max:           "16G"
+nextcloud_php_max_execution_time: 3600
+nextcloud_php_opcache_memory:     256
+
+nextcloud_redis_host:     "10.0.50.12"
+nextcloud_redis_port:     6379
+
+nextcloud_keycloak_url:   "https://id.example.com"
+nextcloud_keycloak_realm: "it-stack"
+nextcloud_oidc_client:    "nextcloud"
+
+nextcloud_max_upload_size: "16G"
+nextcloud_cron_interval:   5
+
+nextcloud_firewall_ports:
+  - { port: "80",  proto: tcp, from: "10.0.50.0/24" }
+  - { port: "443", proto: tcp, from: "10.0.50.0/24" }

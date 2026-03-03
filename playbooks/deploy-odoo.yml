@@ -1,0 +1,50 @@
+---
+# playbooks/deploy-odoo.yml
+# Deploy and configure Odoo ERP on lab-biz1.
+# Run with: make deploy-odoo
+#
+# Prerequisites:
+#   - Phase 1 complete; SuiteCRM deployed (shares lab-biz1)
+#   - vault/secrets.yml contains: vault_pg_odoo_pass, vault_odoo_admin_pass, vault_odoo_master_pass
+
+- name: "Deploy Odoo Enterprise Resource Planning"
+  hosts: business
+  gather_facts: true
+  vars_files:
+    - ../vault/secrets.yml
+
+  pre_tasks:
+    - name: "Assert Odoo vault vars present"
+      ansible.builtin.assert:
+        that:
+          - vault_pg_odoo_pass is defined
+          - vault_odoo_admin_pass is defined
+          - vault_odoo_master_pass is defined
+        fail_msg: "Missing Odoo vault variables in vault/secrets.yml"
+
+  roles:
+    - role: common
+      tags: [common]
+    - role: odoo
+      tags: [odoo, business, erp]
+
+  post_tasks:
+    - name: "Verify Odoo HTTP health"
+      ansible.builtin.uri:
+        url: "http://localhost:{{ odoo_http_port }}/web/health"
+        return_content: true
+        status_code: 200
+      register: odoo_health
+      ignore_errors: true
+      tags: [verify]
+
+    - name: "Display Odoo deployment summary"
+      ansible.builtin.debug:
+        msg:
+          - "Odoo {{ odoo_version }} deployed on {{ inventory_hostname }}"
+          - "URL: https://erp.{{ it_stack_domain }}"
+          - "HTTP port: {{ odoo_http_port }}"
+          - "Longpolling port: {{ odoo_longpolling_port }}"
+          - "Workers: {{ odoo_workers }}"
+          - "DB: {{ odoo_db_host }} / odoo"
+      tags: [verify]

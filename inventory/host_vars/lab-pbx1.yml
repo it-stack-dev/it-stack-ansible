@@ -1,0 +1,17 @@
+---
+# inventory/host_vars/lab-pbx1.yml
+# VoIP server â€” FreePBX / Asterisk
+ansible_host:           "10.0.50.16"
+server_role:            "voip"
+server_description:     "FreePBX + Asterisk VoIP PBX"
+server_ram_gb:          8
+server_vcpus:           4
+server_disk_gb:         100
+
+ufw_allow_ports:
+  - { port: 80,    proto: tcp, comment: "FreePBX Admin HTTP" }
+  - { port: 443,   proto: tcp, comment: "FreePBX Admin HTTPS" }
+  - { port: 5060,  proto: tcp, comment: "SIP TCP" }
+  - { port: 5060,  proto: udp, comment: "SIP UDP" }
+  - { port: 5061,  proto: tcp, comment: "SIP TLS" }
+  - { port: "10000:20000", proto: udp, comment: "RTP media" }

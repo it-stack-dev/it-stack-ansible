@@ -1,0 +1,10 @@
+﻿---
+# tasks/main.yml - openkm
+
+- name: "Import openkm installation tasks"
+  ansible.builtin.import_tasks: install.yml
+  tags: [openkm, install]
+
+- name: "Import openkm configuration tasks"
+  ansible.builtin.import_tasks: configure.yml
+  tags: [openkm, configure]

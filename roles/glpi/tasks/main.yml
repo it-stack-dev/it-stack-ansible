@@ -1,0 +1,10 @@
+﻿---
+# tasks/main.yml - glpi
+
+- name: "Import glpi installation tasks"
+  ansible.builtin.import_tasks: install.yml
+  tags: [glpi, install]
+
+- name: "Import glpi configuration tasks"
+  ansible.builtin.import_tasks: configure.yml
+  tags: [glpi, configure]

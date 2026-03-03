@@ -1,0 +1,31 @@
+﻿---
+# roles/jitsi/tasks/configure.yml
+
+- name: "Deploy Prosody configuration"
+  ansible.builtin.template:
+    src: prosody.cfg.lua.j2
+    dest: "/etc/prosody/conf.d/{{ jitsi_xmpp_domain }}.cfg.lua"
+    mode: "0644"
+  notify: restart prosody
+
+- name: "Deploy Jitsi Meet interface config"
+  ansible.builtin.template:
+    src: interface_config.js.j2
+    dest: /etc/jitsi/meet/{{ jitsi_xmpp_domain }}-interface_config.js
+    mode: "0644"
+
+- name: "Deploy coturn configuration"
+  ansible.builtin.template:
+    src: coturn.conf.j2
+    dest: /etc/turnserver.conf
+    mode: "0644"
+
+- name: "Enable and start Jitsi services"
+  ansible.builtin.systemd:
+    name: "{{ item }}"
+    enabled: true
+    state: started
+  loop:
+    - prosody
+    - jicofo
+    - jitsi-videobridge2

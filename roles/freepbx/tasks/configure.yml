@@ -1,0 +1,37 @@
+﻿---
+# roles/freepbx/tasks/configure.yml
+
+- name: "Deploy Asterisk pjsip.conf"
+  ansible.builtin.template:
+    src: pjsip.conf.j2
+    dest: /etc/asterisk/pjsip.conf
+    owner: "{{ freepbx_user }}"
+    group: "{{ freepbx_group }}"
+    mode: "0640"
+  notify: restart asterisk
+
+- name: "Deploy Asterisk rtp.conf"
+  ansible.builtin.template:
+    src: rtp.conf.j2
+    dest: /etc/asterisk/rtp.conf
+    owner: "{{ freepbx_user }}"
+    group: "{{ freepbx_group }}"
+    mode: "0640"
+  notify: restart asterisk
+
+- name: "Configure FreePBX timezone"
+  ansible.builtin.command:
+    cmd: "fwconsole setting TIMEZONE {{ freepbx_timezone }}"
+  changed_when: false
+
+- name: "Enable Apache mod_rewrite"
+  community.general.apache2_module:
+    name: rewrite
+    state: present
+  notify: restart apache2
+
+- name: "Ensure Asterisk is enabled and started"
+  ansible.builtin.systemd:
+    name: asterisk
+    enabled: true
+    state: started

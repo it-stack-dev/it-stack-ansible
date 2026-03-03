@@ -1,0 +1,49 @@
+---
+# playbooks/deploy-openkm.yml
+# Deploy and configure OpenKM Document Management System on lab-biz1.
+# Run with: make deploy-openkm
+#
+# Prerequisites:
+#   - Phase 1 complete; Java 17 available
+#   - vault/secrets.yml contains: vault_pg_openkm_pass, vault_openkm_admin_pass
+
+- name: "Deploy OpenKM Document Management System"
+  hosts: business
+  gather_facts: true
+  vars_files:
+    - ../vault/secrets.yml
+
+  pre_tasks:
+    - name: "Assert OpenKM vault vars present"
+      ansible.builtin.assert:
+        that:
+          - vault_pg_openkm_pass is defined
+          - vault_openkm_admin_pass is defined
+        fail_msg: "Missing OpenKM vault variables in vault/secrets.yml"
+
+  roles:
+    - role: common
+      tags: [common]
+    - role: openkm
+      tags: [openkm, business, dms]
+
+  post_tasks:
+    - name: "Verify OpenKM HTTP port"
+      ansible.builtin.wait_for:
+        port: "{{ openkm_http_port }}"
+        host: localhost
+        timeout: 60
+        msg: "OpenKM port {{ openkm_http_port }} not listening after 60s"
+      ignore_errors: true
+      tags: [verify]
+
+    - name: "Display OpenKM deployment summary"
+      ansible.builtin.debug:
+        msg:
+          - "OpenKM {{ openkm_version }} deployed on {{ inventory_hostname }}"
+          - "URL: https://docs.{{ it_stack_domain }}"
+          - "HTTP port: {{ openkm_http_port }}"
+          - "Data dir: {{ openkm_data_dir }}"
+          - "DB: {{ openkm_db_host }} / {{ openkm_db_name }}"
+          - "JVM opts: {{ openkm_java_opts }}"
+      tags: [verify]

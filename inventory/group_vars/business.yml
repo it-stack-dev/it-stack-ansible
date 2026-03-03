@@ -1,0 +1,46 @@
+---
+# ============================================================
+# Business Applications Server Variables (lab-biz1 - 10.0.50.17)
+# inventory/group_vars/business.yml
+# ============================================================
+
+# â”€â”€ SuiteCRM â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+suitecrm_version:           "7.14"
+suitecrm_install_dir:       "/var/www/suitecrm"
+suitecrm_db_host:           "10.0.50.12"
+suitecrm_db_name:           "suitecrm"
+suitecrm_db_user:           "suitecrm"
+suitecrm_site_url:          "https://crm.{{ it_stack_domain }}"
+suitecrm_admin_user:        "admin"
+suitecrm_php_memory_limit:  "768M"
+suitecrm_cron_interval:     "*/5 * * * *"
+
+# â”€â”€ Odoo â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+odoo_version:               "17.0"
+odoo_install_dir:           "/opt/odoo"
+odoo_config_dir:            "/etc/odoo"
+odoo_log_dir:               "/var/log/odoo"
+odoo_db_host:               "10.0.50.12"
+odoo_db_user:               "odoo"
+odoo_admin_email:           "admin@{{ it_stack_domain }}"
+odoo_http_port:             8069
+odoo_longpolling_port:      8072
+odoo_workers:               4
+odoo_max_cron_threads:      2
+odoo_limit_memory_hard:     "2684354560"   # 2.5 GB
+odoo_limit_memory_soft:     "2147483648"   # 2 GB
+odoo_limit_time_cpu:        60
+odoo_limit_time_real:       120
+
+# â”€â”€ OpenKM â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+openkm_version:             "7.1"
+openkm_install_dir:         "/opt/openkm"
+openkm_data_dir:            "/srv/openkm/data"
+openkm_db_host:             "10.0.50.12"
+openkm_db_name:             "openkm"
+openkm_db_user:             "openkm"
+openkm_http_port:           8080
+openkm_tomcat_port:         8009
+openkm_java_opts:           "-Xmx2g -Xms512m"
+openkm_admin_user:          "okmAdmin"
+openkm_repository_home:     "/srv/openkm/data"

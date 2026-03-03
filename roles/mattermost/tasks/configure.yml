@@ -1,0 +1,26 @@
+﻿---
+# roles/mattermost/tasks/configure.yml
+
+- name: "Deploy Mattermost config.json"
+  ansible.builtin.template:
+    src: mattermost-config.json.j2
+    dest: "{{ mattermost_install_dir }}/current/config/config.json"
+    owner: "{{ mattermost_user }}"
+    group: "{{ mattermost_group }}"
+    mode: "0600"
+  notify: restart mattermost
+
+- name: "Ensure Mattermost service is enabled and started"
+  ansible.builtin.systemd:
+    name: mattermost
+    enabled: true
+    state: started
+
+- name: "Wait for Mattermost API to respond"
+  ansible.builtin.uri:
+    url: "http://localhost:{{ mattermost_port }}/api/v4/system/ping"
+    status_code: 200
+  register: mm_ping
+  retries: 12
+  delay: 10
+  until: mm_ping.status == 200

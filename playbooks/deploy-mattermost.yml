@@ -1,0 +1,48 @@
+---
+# playbooks/deploy-mattermost.yml
+# Deploy and configure Mattermost Team Edition on lab-app1.
+# Run with: make deploy-mattermost
+#
+# Prerequisites:
+#   - Phase 1 complete; Nextcloud deployed (shares PHP/Nginx)
+#   - vault/secrets.yml contains: vault_pg_mattermost_pass, vault_mattermost_admin_pass
+
+- name: "Deploy Mattermost Team Messaging"
+  hosts: collaboration
+  gather_facts: true
+  vars_files:
+    - ../vault/secrets.yml
+
+  pre_tasks:
+    - name: "Assert Mattermost vault vars present"
+      ansible.builtin.assert:
+        that:
+          - vault_pg_mattermost_pass is defined
+          - vault_mattermost_admin_pass is defined
+        fail_msg: "Missing Mattermost vault variables in vault/secrets.yml"
+
+  roles:
+    - role: common
+      tags: [common]
+    - role: mattermost
+      tags: [mattermost, collaboration]
+
+  post_tasks:
+    - name: "Verify Mattermost API health"
+      ansible.builtin.uri:
+        url: "http://localhost:{{ mattermost_port }}/api/v4/system/ping"
+        return_content: true
+        status_code: 200
+      register: mm_health
+      ignore_errors: true
+      tags: [verify]
+
+    - name: "Display Mattermost deployment summary"
+      ansible.builtin.debug:
+        msg:
+          - "Mattermost {{ mattermost_version }} deployed on {{ inventory_hostname }}"
+          - "URL: {{ mattermost_site_url }}"
+          - "Admin: {{ mattermost_system_admin }}"
+          - "Port: {{ mattermost_port }}"
+          - "DB: {{ mattermost_db_host }} / {{ mattermost_db_name }}"
+      tags: [verify]

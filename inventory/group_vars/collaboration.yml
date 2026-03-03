@@ -1,0 +1,44 @@
+---
+# ============================================================
+# Collaboration Server Variables (lab-app1 - 10.0.50.13)
+# inventory/group_vars/collaboration.yml
+# ============================================================
+
+# â”€â”€ Nextcloud â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+nextcloud_version:          "28"
+nextcloud_install_dir:      "/var/www/nextcloud"
+nextcloud_data_dir:         "/srv/nextcloud/data"
+nextcloud_db_host:          "10.0.50.12"
+nextcloud_db_name:          "nextcloud"
+nextcloud_db_user:          "nextcloud"
+nextcloud_admin_user:       "admin"
+nextcloud_trusted_domains:
+  - "cloud.{{ it_stack_domain }}"
+  - "10.0.50.13"
+nextcloud_php_memory_limit: "1024M"
+nextcloud_max_upload:       "16G"
+nextcloud_port:             80
+nextcloud_https_port:       443
+
+# â”€â”€ Mattermost â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+mattermost_version:         "9.5"
+mattermost_install_dir:     "/opt/mattermost"
+mattermost_data_dir:        "/opt/mattermost/data"
+mattermost_db_host:         "10.0.50.12"
+mattermost_db_name:         "mattermost"
+mattermost_db_user:         "mattermost"
+mattermost_site_url:        "https://chat.{{ it_stack_domain }}"
+mattermost_port:            8065
+mattermost_system_admin:    "mmadmin"
+mattermost_team_name:       "IT-Stack Team"
+
+# â”€â”€ Jitsi Meet â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+jitsi_domain:               "meet.{{ it_stack_domain }}"
+jitsi_enable_auth:          true
+jitsi_auth_type:            "jwt"
+jitsi_jicofo_auth_user:     "focus"
+jitsi_jvb_auth_user:        "jvb"
+jitsi_stun_servers:
+  - "stun.l.google.com:19302"
+jitsi_prosody_port:         5222
+jitsi_videobridge_port:     10000

@@ -1,0 +1,19 @@
+﻿# templates/graylog-server.conf.j2
+
+is_master = true
+node_id_file = /var/lib/graylog-server/node-id
+
+password_secret = {{ vault_graylog_password_secret }}
+root_password_sha2 = {{ vault_graylog_admin_sha256 }}
+root_username = admin
+
+http_bind_address = 0.0.0.0:{{ graylog_http_port }}
+http_external_uri = https://{{ graylog_hostname }}/
+
+elasticsearch_hosts = {{ graylog_elasticsearch_hosts }}
+mongodb_uri = {{ graylog_mongodb_uri }}
+
+message_journal_max_size = {{ graylog_message_journal_max_size }}
+
+# Zabbix integration (log-based alerts via script)
+# alert_receivers.0 = zabbix:{{ graylog_zabbix_api_url }}

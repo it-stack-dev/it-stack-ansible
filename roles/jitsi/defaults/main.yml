@@ -1,0 +1,35 @@
+---
+# roles/jitsi/defaults/main.yml
+
+jitsi_hostname:           "meet.example.com"
+jitsi_xmpp_domain:        "meet.example.com"
+jitsi_xmpp_auth_domain:   "auth.meet.example.com"
+jitsi_xmpp_muc_domain:    "muc.meet.example.com"
+jitsi_xmpp_guest_domain:  "guest.meet.example.com"
+
+jitsi_jicofo_user:        "focus"
+jitsi_jvb_user:           "jvb"
+
+jitsi_https_port:         443
+jitsi_jvb_port:           10000
+jitsi_turn_port:          3478
+jitsi_jvb_tcp_port:       4443
+
+jitsi_keycloak_url:       "https://id.example.com"
+jitsi_keycloak_realm:     "it-stack"
+jitsi_oidc_client:        "jitsi"
+
+jitsi_stun_servers:
+  - "stun:meet.jit.si:443"
+  - "stun:stun.l.google.com:19302"
+
+jitsi_max_participants:   100
+jitsi_start_with_audio_muted:   false
+jitsi_start_with_video_muted:   false
+jitsi_require_display_name:     true
+
+jitsi_firewall_ports:
+  - { port: "443",   proto: tcp,  from: "0.0.0.0/0" }
+  - { port: "10000", proto: udp,  from: "0.0.0.0/0" }
+  - { port: "4443",  proto: tcp,  from: "0.0.0.0/0" }
+  - { port: "3478",  proto: udp,  from: "0.0.0.0/0" }

@@ -1,0 +1,21 @@
+﻿---
+# roles/elasticsearch/meta/main.yml
+
+galaxy_info:
+  role_name: elasticsearch
+  author: it-stack-dev
+  description: Deploy Elasticsearch search and analytics engine
+  license: Apache-2.0
+  min_ansible_version: "2.15"
+  platforms:
+    - name: Ubuntu
+      versions:
+        - "24.04"
+  galaxy_tags:
+    - elasticsearch
+    - search
+    - logging
+    - it-stack
+
+dependencies:
+  - role: common

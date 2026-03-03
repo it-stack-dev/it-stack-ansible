@@ -1,0 +1,10 @@
+﻿---
+# tasks/main.yml - mattermost
+
+- name: "Import mattermost installation tasks"
+  ansible.builtin.import_tasks: install.yml
+  tags: [mattermost, install]
+
+- name: "Import mattermost configuration tasks"
+  ansible.builtin.import_tasks: configure.yml
+  tags: [mattermost, configure]

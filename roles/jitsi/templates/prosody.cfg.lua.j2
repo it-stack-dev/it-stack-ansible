@@ -1,0 +1,31 @@
+﻿-- templates/prosody.cfg.lua.j2
+-- Jitsi Meet Prosody configuration
+
+VirtualHost "{{ jitsi_xmpp_domain }}"
+    authentication = "token"
+    app_id = "{{ jitsi_oidc_client }}"
+    app_secret = "{{ vault_jitsi_jwt_secret }}"
+    modules_enabled = {
+        "bosh";
+        "pubsub";
+        "ping";
+        "speakerstats";
+        "conference_duration";
+    }
+    c2s_require_encryption = false
+
+Component "conference.{{ jitsi_xmpp_domain }}" "muc"
+    storage = "memory"
+    modules_enabled = {
+        "muc_meeting_id";
+        "muc_domain_mapper";
+    }
+    admins = { "focus@{{ jitsi_xmpp_auth_domain }}" }
+    muc_room_allow_persistent = false
+
+Component "jvb.{{ jitsi_xmpp_domain }}"
+    component_secret = "{{ vault_jitsi_jvb_secret }}"
+
+VirtualHost "{{ jitsi_xmpp_auth_domain }}"
+    modules_enabled = { "limits_exception"; }
+    authentication = "internal_hashed"

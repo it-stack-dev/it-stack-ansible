@@ -1,0 +1,46 @@
+---
+# playbooks/deploy-zabbix.yml
+# Deploy and configure Zabbix Monitoring on lab-comm1.
+# Run with: make deploy-zabbix
+#
+# Prerequisites:
+#   - Phase 1 complete; PostgreSQL running; Mattermost deployed for alert webhooks
+#   - vault/secrets.yml contains: vault_pg_zabbix_pass, vault_zabbix_admin_pass
+
+- name: "Deploy Zabbix Infrastructure Monitoring"
+  hosts: communications
+  gather_facts: true
+  vars_files:
+    - ../vault/secrets.yml
+
+  pre_tasks:
+    - name: "Assert Zabbix vault vars present"
+      ansible.builtin.assert:
+        that:
+          - vault_pg_zabbix_pass is defined
+          - vault_zabbix_admin_pass is defined
+        fail_msg: "Missing Zabbix vault variables in vault/secrets.yml"
+
+  roles:
+    - role: common
+      tags: [common]
+    - role: zabbix
+      tags: [zabbix, monitoring, infrastructure]
+
+  post_tasks:
+    - name: "Verify Zabbix server port"
+      ansible.builtin.wait_for:
+        port: "{{ zabbix_server_port }}"
+        host: localhost
+        timeout: 30
+      ignore_errors: true
+      tags: [verify]
+
+    - name: "Display Zabbix deployment summary"
+      ansible.builtin.debug:
+        msg:
+          - "Zabbix {{ zabbix_version }} deployed on {{ inventory_hostname }}"
+          - "Frontend URL: https://{{ zabbix_frontend_fqdn }}"
+          - "Server port: {{ zabbix_server_port }}"
+          - "DB: {{ zabbix_db_host }} / {{ zabbix_db_name }}"
+      tags: [verify]

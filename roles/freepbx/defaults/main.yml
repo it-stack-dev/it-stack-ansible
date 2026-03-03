@@ -1,0 +1,36 @@
+---
+# roles/freepbx/defaults/main.yml
+
+freepbx_version:          "17"
+asterisk_version:         "21"
+freepbx_install_dir:      "/var/lib/asterisk"
+freepbx_log_dir:          "/var/log/asterisk"
+freepbx_user:             "asterisk"
+freepbx_group:            "asterisk"
+
+freepbx_http_port:        80
+freepbx_https_port:       443
+freepbx_hostname:         "pbx.example.com"
+freepbx_timezone:         "UTC"
+
+freepbx_db_host:          "localhost"    # MariaDB local, not on lab-db1
+freepbx_db_name:          "asterisk"
+freepbx_db_user:          "asterisk"
+
+freepbx_sip_port:         5060
+freepbx_sips_port:        5061
+freepbx_rtp_start:        10000
+freepbx_rtp_end:          20000
+
+freepbx_admin_user:       "admin"
+
+freepbx_freeipa_ldap_host:  "10.0.50.11"
+freepbx_freeipa_base_dn:    "cn=users,cn=accounts,dc=internal,dc=example,dc=com"
+
+freepbx_firewall_ports:
+  - { port: "80",              proto: tcp, from: "10.0.50.0/24" }
+  - { port: "443",             proto: tcp, from: "10.0.50.0/24" }
+  - { port: "5060",            proto: tcp, from: "0.0.0.0/0" }
+  - { port: "5060",            proto: udp, from: "0.0.0.0/0" }
+  - { port: "5061",            proto: tcp, from: "0.0.0.0/0" }
+  - { port: "10000:20000",     proto: udp, from: "0.0.0.0/0" }

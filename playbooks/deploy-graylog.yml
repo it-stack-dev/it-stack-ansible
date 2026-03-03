@@ -1,0 +1,49 @@
+---
+# playbooks/deploy-graylog.yml
+# Deploy and configure Graylog Log Management on lab-proxy1.
+# Run with: make deploy-graylog
+#
+# Prerequisites:
+#   - Elasticsearch running on lab-db1; MongoDB available
+#   - vault/secrets.yml contains: vault_graylog_password_secret, vault_graylog_root_password_sha2
+
+- name: "Deploy Graylog Centralized Log Management"
+  hosts: infrastructure
+  gather_facts: true
+  vars_files:
+    - ../vault/secrets.yml
+
+  pre_tasks:
+    - name: "Assert Graylog vault vars present"
+      ansible.builtin.assert:
+        that:
+          - vault_graylog_password_secret is defined
+          - vault_graylog_root_password_sha2 is defined
+        fail_msg: "Missing Graylog vault variables in vault/secrets.yml"
+
+  roles:
+    - role: common
+      tags: [common]
+    - role: graylog
+      tags: [graylog, logging, infrastructure]
+
+  post_tasks:
+    - name: "Verify Graylog API health"
+      ansible.builtin.uri:
+        url: "http://localhost:{{ graylog_http_port }}/api/"
+        return_content: true
+        status_code: 200
+      register: graylog_health
+      ignore_errors: true
+      tags: [verify]
+
+    - name: "Display Graylog deployment summary"
+      ansible.builtin.debug:
+        msg:
+          - "Graylog {{ graylog_version }} deployed on {{ inventory_hostname }}"
+          - "URL: https://logs.{{ it_stack_domain }}"
+          - "HTTP port: {{ graylog_http_port }}"
+          - "Syslog UDP: {{ graylog_syslog_udp_port }}"
+          - "GELF TCP: {{ graylog_gelf_tcp_port }}"
+          - "Elasticsearch: {{ graylog_elasticsearch_hosts }}"
+      tags: [verify]

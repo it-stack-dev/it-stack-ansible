@@ -1,0 +1,47 @@
+---
+# playbooks/deploy-jitsi.yml
+# Deploy and configure Jitsi Meet on lab-app1.
+# Run with: make deploy-jitsi
+#
+# Prerequisites:
+#   - Phase 1 complete; Keycloak running for JWT auth
+#   - vault/secrets.yml contains: vault_jitsi_jicofo_pass, vault_jitsi_jvb_pass, vault_jitsi_jwt_secret
+
+- name: "Deploy Jitsi Meet Video Conferencing"
+  hosts: collaboration
+  gather_facts: true
+  vars_files:
+    - ../vault/secrets.yml
+
+  pre_tasks:
+    - name: "Assert Jitsi vault vars present"
+      ansible.builtin.assert:
+        that:
+          - vault_jitsi_jicofo_pass is defined
+          - vault_jitsi_jvb_pass is defined
+          - vault_jitsi_jwt_secret is defined
+        fail_msg: "Missing Jitsi vault variables in vault/secrets.yml"
+
+  roles:
+    - role: common
+      tags: [common]
+    - role: jitsi
+      tags: [jitsi, collaboration]
+
+  post_tasks:
+    - name: "Verify Jitsi XMPP port reachable"
+      ansible.builtin.wait_for:
+        port: "{{ jitsi_prosody_port }}"
+        host: localhost
+        timeout: 30
+      ignore_errors: true
+      tags: [verify]
+
+    - name: "Display Jitsi deployment summary"
+      ansible.builtin.debug:
+        msg:
+          - "Jitsi Meet deployed on {{ inventory_hostname }}"
+          - "URL: https://{{ jitsi_domain }}"
+          - "Auth type: {{ jitsi_auth_type }}"
+          - "STUN servers: {{ jitsi_stun_servers | join(', ') }}"
+      tags: [verify]

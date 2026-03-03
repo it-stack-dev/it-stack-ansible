@@ -1,0 +1,60 @@
+﻿---
+# roles/iredmail/tasks/install.yml
+
+- name: "Set system hostname for iRedMail"
+  ansible.builtin.hostname:
+    name: "{{ iredmail_hostname }}"
+
+- name: "Ensure /etc/hosts contains FQDN"
+  ansible.builtin.lineinfile:
+    path: /etc/hosts
+    line: "{{ ansible_default_ipv4.address }} {{ iredmail_hostname }} {{ iredmail_hostname.split('.')[0] }}"
+    state: present
+
+- name: "Install iRedMail prerequisites"
+  ansible.builtin.apt:
+    name:
+      - wget
+      - ssl-cert
+      - postfix
+      - postfix-pgsql
+      - dovecot-core
+      - dovecot-imapd
+      - dovecot-pop3d
+      - dovecot-pgsql
+      - dovecot-sieve
+      - amavisd-new
+      - spamassassin
+      - clamav
+      - clamav-daemon
+      - unzip
+    state: present
+    update_cache: true
+
+- name: "Create iRedMail install directory"
+  ansible.builtin.file:
+    path: "{{ iredmail_install_dir }}"
+    state: directory
+    mode: "0700"
+
+- name: "Download iRedMail {{ iredmail_version }}"
+  ansible.builtin.get_url:
+    url: "https://github.com/iredmail/iRedMail/archive/refs/tags/{{ iredmail_version }}.tar.gz"
+    dest: "/tmp/iredmail-{{ iredmail_version }}.tar.gz"
+    mode: "0644"
+
+- name: "Extract iRedMail"
+  ansible.builtin.unarchive:
+    src: "/tmp/iredmail-{{ iredmail_version }}.tar.gz"
+    dest: "{{ iredmail_install_dir }}"
+    remote_src: true
+
+- name: "Open iRedMail firewall ports"
+  community.general.ufw:
+    rule: allow
+    port: "{{ item.port | string }}"
+    proto: "{{ item.proto }}"
+    src: "{{ item.from }}"
+    comment: "iRedMail"
+  loop: "{{ iredmail_firewall_ports }}"
+  tags: [firewall]

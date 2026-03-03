@@ -1,0 +1,31 @@
+﻿# templates/glpi-nginx.conf.j2
+
+server {
+    listen 80;
+    server_name {{ glpi_hostname }};
+    return 301 https://\System.Management.Automation.Internal.Host.InternalHost\;
+}
+
+server {
+    listen 443 ssl http2;
+    server_name {{ glpi_hostname }};
+
+    ssl_certificate     /etc/ssl/certs/it-stack.crt;
+    ssl_certificate_key /etc/ssl/private/it-stack.key;
+
+    root   {{ glpi_install_dir }};
+    index  index.php;
+
+    location / {
+        try_files \ \/ /index.php?\;
+    }
+
+    location ~ \.php\$ {
+        include        fastcgi_params;
+        fastcgi_pass   unix:/run/php/php8.3-fpm-glpi.sock;
+        fastcgi_param  SCRIPT_FILENAME \\;
+        fastcgi_read_timeout 120;
+    }
+
+    location ~ ^/(config|files|scripts|vendor)/ { deny all; }
+}

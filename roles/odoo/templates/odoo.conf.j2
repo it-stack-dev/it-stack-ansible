@@ -1,0 +1,30 @@
+﻿[options]
+; templates/odoo.conf.j2
+
+admin_passwd = {{ vault_odoo_admin_pass }}
+
+db_host    = {{ odoo_db_host }}
+db_port    = {{ odoo_db_port }}
+db_user    = {{ odoo_db_user }}
+db_password = {{ vault_odoo_db_pass }}
+db_name    = {{ odoo_db_name }}
+db_filter  = {{ odoo_db_filter }}
+
+http_interface = 0.0.0.0
+http_port      = {{ odoo_http_port }}
+gevent_port    = {{ odoo_gevent_port }}
+longpolling_port = {{ odoo_gevent_port }}
+
+workers           = {{ odoo_workers }}
+max_cron_threads  = {{ odoo_max_cron_threads }}
+limit_memory_hard = {{ odoo_limit_memory_hard }}
+limit_memory_soft = {{ odoo_limit_memory_soft }}
+limit_time_cpu    = {{ odoo_limit_time_cpu }}
+limit_time_real   = {{ odoo_limit_time_real }}
+
+logfile = {{ odoo_log_dir }}/odoo.log
+log_level = info
+
+smtp_server   = {{ odoo_smtp_host }}
+smtp_port     = {{ odoo_smtp_port }}
+smtp_from     = {{ odoo_smtp_from }}

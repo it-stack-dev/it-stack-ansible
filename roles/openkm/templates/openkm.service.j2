@@ -1,0 +1,17 @@
+﻿[Unit]
+Description=OpenKM Document Management System
+After=network.target postgresql.service elasticsearch.service
+
+[Service]
+Type=simple
+User={{ openkm_user }}
+Group={{ openkm_group }}
+ExecStart=/usr/bin/java {{ openkm_java_opts }} -jar {{ openkm_install_dir }}/openkm.war
+WorkingDirectory={{ openkm_install_dir }}
+StandardOutput=append:{{ openkm_log_dir }}/openkm.log
+StandardError=append:{{ openkm_log_dir }}/openkm.err
+Restart=on-failure
+RestartSec=15
+
+[Install]
+WantedBy=multi-user.target

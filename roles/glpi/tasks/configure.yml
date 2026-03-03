@@ -1,0 +1,31 @@
+﻿---
+# roles/glpi/tasks/configure.yml
+
+- name: "Deploy Nginx vhost for GLPI"
+  ansible.builtin.template:
+    src: glpi-nginx.conf.j2
+    dest: /etc/nginx/sites-available/glpi
+    mode: "0644"
+  notify: restart nginx
+
+- name: "Enable GLPI Nginx site"
+  ansible.builtin.file:
+    src: /etc/nginx/sites-available/glpi
+    dest: /etc/nginx/sites-enabled/glpi
+    state: link
+  notify: restart nginx
+
+- name: "Set up GLPI cron job"
+  ansible.builtin.cron:
+    name: "GLPI cron"
+    minute: "*"
+    user: "{{ glpi_user }}"
+    job: "php {{ glpi_install_dir }}/front/cron.php &>/dev/null"
+
+- name: "Deploy GLPI downstream config"
+  ansible.builtin.template:
+    src: glpi-downstream.php.j2
+    dest: "{{ glpi_install_dir }}/inc/downstream.php"
+    owner: "{{ glpi_user }}"
+    group: "{{ glpi_group }}"
+    mode: "0640"

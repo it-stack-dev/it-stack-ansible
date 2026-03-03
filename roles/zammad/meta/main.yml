@@ -1,0 +1,21 @@
+﻿---
+# roles/zammad/meta/main.yml
+
+galaxy_info:
+  role_name: zammad
+  author: it-stack-dev
+  description: Deploy Zammad help desk and ticketing system
+  license: Apache-2.0
+  min_ansible_version: "2.15"
+  platforms:
+    - name: Ubuntu
+      versions:
+        - "24.04"
+  galaxy_tags:
+    - zammad
+    - helpdesk
+    - ticketing
+    - it-stack
+
+dependencies:
+  - role: common

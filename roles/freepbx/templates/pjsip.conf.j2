@@ -1,0 +1,23 @@
+﻿; templates/pjsip.conf.j2
+
+[global]
+type=global
+user_agent=IT-Stack PBX
+
+[transport-udp]
+type=transport
+protocol=udp
+bind=0.0.0.0:{{ freepbx_sip_port }}
+
+[transport-tcp]
+type=transport
+protocol=tcp
+bind=0.0.0.0:{{ freepbx_sip_port }}
+
+[transport-tls]
+type=transport
+protocol=tls
+bind=0.0.0.0:{{ freepbx_sips_port }}
+cert_file=/etc/ssl/certs/it-stack.crt
+priv_key_file=/etc/ssl/private/it-stack.key
+method=tlsv1_2

@@ -1,0 +1,11 @@
+﻿---
+# roles/zammad/handlers/main.yml
+
+- name: "restart zammad"
+  ansible.builtin.systemd:
+    name: zammad
+    state: restarted
+
+- name: "reload systemd"
+  ansible.builtin.systemd:
+    daemon_reload: true

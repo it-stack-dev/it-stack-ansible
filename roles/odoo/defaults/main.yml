@@ -1,0 +1,43 @@
+---
+# roles/odoo/defaults/main.yml
+
+odoo_version:             "17.0"
+odoo_install_dir:         "/opt/odoo"
+odoo_data_dir:            "/var/lib/odoo"
+odoo_log_dir:             "/var/log/odoo"
+odoo_user:                "odoo"
+odoo_group:               "odoo"
+
+odoo_http_port:           8069
+odoo_gevent_port:         8072
+odoo_hostname:            "erp.example.com"
+
+odoo_db_host:             "10.0.50.12"
+odoo_db_port:             5432
+odoo_db_name:             "odoo"
+odoo_db_user:             "odoo"
+odoo_db_filter:           "odoo"
+
+odoo_admin_passwd:        "{{ vault_odoo_admin_pass }}"
+
+odoo_keycloak_url:        "https://id.example.com"
+odoo_keycloak_realm:      "it-stack"
+odoo_oidc_client:         "odoo"
+
+odoo_workers:             4
+odoo_max_cron_threads:    2
+odoo_limit_memory_hard:   2684354560   # 2.5 GB
+odoo_limit_memory_soft:   2147483648   # 2 GB
+odoo_limit_time_cpu:      60
+odoo_limit_time_real:     120
+
+odoo_smtp_host:           "10.0.50.14"
+odoo_smtp_port:           25
+odoo_smtp_from:           "odoo@example.com"
+
+odoo_freeipa_ldap_host:   "10.0.50.11"
+odoo_freeipa_base_dn:     "cn=users,cn=accounts,dc=internal,dc=example,dc=com"
+
+odoo_firewall_ports:
+  - { port: "8069", proto: tcp, from: "10.0.50.0/24" }
+  - { port: "8072", proto: tcp, from: "10.0.50.0/24" }

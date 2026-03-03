@@ -1,0 +1,41 @@
+---
+# roles/suitecrm/defaults/main.yml
+
+suitecrm_version:         "8.6.1"
+suitecrm_install_dir:     "/var/www/suitecrm"
+suitecrm_log_dir:         "/var/log/suitecrm"
+suitecrm_user:            "www-data"
+suitecrm_group:           "www-data"
+
+suitecrm_http_port:       80
+suitecrm_https_port:      443
+suitecrm_hostname:        "crm.example.com"
+
+suitecrm_db_host:         "10.0.50.12"
+suitecrm_db_port:         5432
+suitecrm_db_name:         "suitecrm"
+suitecrm_db_user:         "suitecrm"
+
+suitecrm_redis_host:      "10.0.50.12"
+suitecrm_redis_port:      6379
+
+suitecrm_admin_user:      "admin"
+suitecrm_site_name:       "IT-Stack CRM"
+
+suitecrm_keycloak_url:    "https://id.example.com"
+suitecrm_keycloak_realm:  "it-stack"
+suitecrm_saml_client:     "suitecrm"
+
+suitecrm_php_memory_limit:  "512M"
+suitecrm_php_upload_max:    "100M"
+suitecrm_cron_interval:     5
+
+suitecrm_smtp_host:       "10.0.50.14"
+suitecrm_smtp_port:       25
+suitecrm_smtp_from:       "crm@example.com"
+
+suitecrm_freepbx_api_url: "http://10.0.50.16"
+
+suitecrm_firewall_ports:
+  - { port: "80",  proto: tcp, from: "10.0.50.0/24" }
+  - { port: "443", proto: tcp, from: "10.0.50.0/24" }

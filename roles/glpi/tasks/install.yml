@@ -1,0 +1,74 @@
+﻿---
+# roles/glpi/tasks/install.yml
+
+- name: "Install PHP 8.3 and GLPI dependencies"
+  ansible.builtin.apt:
+    name:
+      - php8.3
+      - php8.3-fpm
+      - php8.3-curl
+      - php8.3-gd
+      - php8.3-intl
+      - php8.3-ldap
+      - php8.3-mbstring
+      - php8.3-mysql
+      - php8.3-xml
+      - php8.3-zip
+      - php8.3-bz2
+      - php8.3-opcache
+      - nginx
+      - mariadb-server   # local MariaDB for GLPI
+      - unzip
+    state: present
+
+- name: "Create GLPI install directory"
+  ansible.builtin.file:
+    path: "{{ glpi_install_dir }}"
+    state: directory
+    owner: "{{ glpi_user }}"
+    group: "{{ glpi_group }}"
+    mode: "0750"
+
+- name: "Check if GLPI is installed"
+  ansible.builtin.stat:
+    path: "{{ glpi_install_dir }}/index.php"
+  register: glpi_installed
+
+- name: "Download GLPI {{ glpi_version }}"
+  ansible.builtin.get_url:
+    url: "https://github.com/glpi-project/glpi/releases/download/{{ glpi_version }}/glpi-{{ glpi_version }}.tgz"
+    dest: "/tmp/glpi-{{ glpi_version }}.tgz"
+    mode: "0644"
+  when: not glpi_installed.stat.exists
+
+- name: "Extract GLPI archive"
+  ansible.builtin.unarchive:
+    src: "/tmp/glpi-{{ glpi_version }}.tgz"
+    dest: /var/www
+    remote_src: true
+    owner: "{{ glpi_user }}"
+    group: "{{ glpi_group }}"
+  when: not glpi_installed.stat.exists
+
+- name: "Rename extracted directory"
+  ansible.builtin.command:
+    cmd: "mv /var/www/glpi /var/www/glpi-app"
+    removes: /var/www/glpi
+  when: not glpi_installed.stat.exists
+
+- name: "Set GLPI permissions"
+  ansible.builtin.file:
+    path: "{{ glpi_install_dir }}"
+    owner: "{{ glpi_user }}"
+    group: "{{ glpi_group }}"
+    recurse: true
+
+- name: "Open GLPI firewall ports"
+  community.general.ufw:
+    rule: allow
+    port: "{{ item.port | string }}"
+    proto: "{{ item.proto }}"
+    src: "{{ item.from }}"
+    comment: "GLPI"
+  loop: "{{ glpi_firewall_ports }}"
+  tags: [firewall]

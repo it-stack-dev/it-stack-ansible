@@ -1,0 +1,23 @@
+﻿# templates/elasticsearch.yml.j2
+
+cluster.name: {{ elasticsearch_cluster_name }}
+node.name:    {{ elasticsearch_node_name }}
+
+path.data: {{ elasticsearch_data_dir }}
+path.logs: {{ elasticsearch_log_dir }}
+
+network.host: 0.0.0.0
+http.port:    {{ elasticsearch_http_port }}
+transport.port: {{ elasticsearch_transport_port }}
+
+discovery.type: {{ elasticsearch_discovery_type }}
+
+xpack.security.enabled: {{ elasticsearch_xpack_security | lower }}
+xpack.security.http.ssl.enabled: false
+xpack.security.transport.ssl.enabled: false
+
+# Bootstrap checks
+bootstrap.memory_lock: true
+
+# ILM
+action.auto_create_index: ".monitoring-*,.watches,.triggered_watches,.watcher-history-*,.ml-*,+*"

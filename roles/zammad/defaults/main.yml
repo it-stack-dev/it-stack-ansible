@@ -1,0 +1,35 @@
+---
+# roles/zammad/defaults/main.yml
+
+zammad_version:           "6.3.0"
+zammad_install_dir:       "/opt/zammad"
+zammad_log_dir:           "/var/log/zammad"
+zammad_user:              "zammad"
+zammad_group:             "zammad"
+
+zammad_port:              3000
+zammad_hostname:          "desk.example.com"
+
+zammad_db_host:           "10.0.50.12"
+zammad_db_port:           5432
+zammad_db_name:           "zammad"
+zammad_db_user:           "zammad"
+
+zammad_elasticsearch_url: "http://10.0.50.12:9200"
+zammad_redis_url:         "redis://10.0.50.12:6379"
+
+zammad_keycloak_url:      "https://id.example.com"
+zammad_keycloak_realm:    "it-stack"
+zammad_oidc_client:       "zammad"
+
+zammad_smtp_host:         "10.0.50.14"
+zammad_smtp_port:         25
+zammad_smtp_from:         "zammad@example.com"
+
+zammad_fqdn:              "desk.example.com"
+zammad_http_type:         "https"
+
+zammad_worker_count:      4
+
+zammad_firewall_ports:
+  - { port: "3000", proto: tcp, from: "10.0.50.0/24" }

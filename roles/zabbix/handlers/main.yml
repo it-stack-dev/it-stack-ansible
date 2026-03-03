@@ -1,0 +1,16 @@
+﻿---
+# roles/zabbix/handlers/main.yml
+
+- name: "restart zabbix-server"
+  ansible.builtin.systemd:
+    name: zabbix-server
+    state: restarted
+
+- name: "restart zabbix-agent2"
+  ansible.builtin.systemd:
+    name: zabbix-agent2
+    state: restarted
+
+- name: "reload systemd"
+  ansible.builtin.systemd:
+    daemon_reload: true

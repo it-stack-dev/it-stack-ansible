@@ -1,0 +1,50 @@
+---
+# playbooks/deploy-elasticsearch.yml
+# Deploy and configure Elasticsearch 8 on lab-db1.
+# Run with: make deploy-elasticsearch
+#
+# Prerequisites:
+#   - PostgreSQL and Redis already deployed on lab-db1
+#   - vault/secrets.yml contains: vault_elasticsearch_password
+
+- name: "Deploy Elasticsearch Search & Analytics Engine"
+  hosts: database
+  gather_facts: true
+  vars_files:
+    - ../vault/secrets.yml
+
+  pre_tasks:
+    - name: "Assert Elasticsearch vault vars present"
+      ansible.builtin.assert:
+        that:
+          - vault_elasticsearch_password is defined
+        fail_msg: "Missing Elasticsearch vault variables in vault/secrets.yml"
+
+  roles:
+    - role: common
+      tags: [common]
+    - role: elasticsearch
+      tags: [elasticsearch, database, search]
+
+  post_tasks:
+    - name: "Verify Elasticsearch cluster health"
+      ansible.builtin.uri:
+        url: "http://localhost:{{ elasticsearch_http_port }}/_cluster/health"
+        user: "elastic"
+        password: "{{ vault_elasticsearch_password }}"
+        force_basic_auth: true
+        return_content: true
+        status_code: 200
+      register: es_health
+      ignore_errors: true
+      tags: [verify]
+
+    - name: "Display Elasticsearch deployment summary"
+      ansible.builtin.debug:
+        msg:
+          - "Elasticsearch {{ elasticsearch_version }} deployed on {{ inventory_hostname }}"
+          - "HTTP port: {{ elasticsearch_http_port }}"
+          - "Transport port: {{ elasticsearch_transport_port }}"
+          - "Data dir: {{ elasticsearch_data_dir }}"
+          - "Heap: {{ elasticsearch_heap_size }}"
+      tags: [verify]

@@ -1,0 +1,22 @@
+﻿---
+# roles/taiga/meta/main.yml
+
+galaxy_info:
+  role_name: taiga
+  author: it-stack-dev
+  description: Deploy Taiga project management platform
+  license: Apache-2.0
+  min_ansible_version: "2.15"
+  platforms:
+    - name: Ubuntu
+      versions:
+        - "24.04"
+  galaxy_tags:
+    - taiga
+    - projects
+    - agile
+    - scrum
+    - it-stack
+
+dependencies:
+  - role: common

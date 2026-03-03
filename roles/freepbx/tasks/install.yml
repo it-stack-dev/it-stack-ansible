@@ -1,0 +1,72 @@
+﻿---
+# roles/freepbx/tasks/install.yml
+
+- name: "Install Asterisk and FreePBX dependencies"
+  ansible.builtin.apt:
+    name:
+      - asterisk
+      - asterisk-modules
+      - asterisk-pjsip
+      - mariadb-server
+      - mariadb-client
+      - apache2
+      - php8.3
+      - php8.3-cli
+      - php8.3-mysql
+      - php8.3-gd
+      - php8.3-curl
+      - php8.3-xml
+      - php8.3-zip
+      - php8.3-bcmath
+      - php8.3-mbstring
+      - nodejs
+      - npm
+      - sox
+      - ffmpeg
+      - lame
+      - curl
+      - wget
+      - git
+      - unixodbc
+      - unixodbc-dev
+    state: present
+    update_cache: true
+
+- name: "Create asterisk system user (if not exists)"
+  ansible.builtin.user:
+    name: "{{ freepbx_user }}"
+    group: "{{ freepbx_group }}"
+    shell: /usr/sbin/nologin
+    system: true
+    create_home: false
+  ignore_errors: true
+
+- name: "Download FreePBX {{ freepbx_version }} installer"
+  ansible.builtin.get_url:
+    url: "https://github.com/FreePBX/sng_freepbx_debian_install/raw/master/sng_freepbx_debian_install.sh"
+    dest: /tmp/freepbx-install.sh
+    mode: "0755"
+
+- name: "Check if FreePBX is already installed"
+  ansible.builtin.stat:
+    path: /var/www/html/admin/bootstrap.php
+  register: fpbx_installed
+
+- name: "Run FreePBX installer (unattended)"
+  ansible.builtin.command:
+    cmd: "bash /tmp/freepbx-install.sh --nointeraction --testing"
+    creates: /var/www/html/admin/bootstrap.php
+  environment:
+    ADMIN_PASSWORD: "{{ vault_freepbx_admin_pass }}"
+  async: 600
+  poll: 30
+
+- name: "Open FreePBX firewall ports"
+  community.general.ufw:
+    rule: allow
+    port: "{{ item.port | string }}"
+    proto: "{{ item.proto }}"
+    src: "{{ item.from }}"
+    comment: "FreePBX"
+  loop: "{{ freepbx_firewall_ports }}"
+  tags: [firewall]

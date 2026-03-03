@@ -1,0 +1,34 @@
+﻿---
+# roles/glpi/defaults/main.yml
+
+glpi_version:             "10.0.15"
+glpi_install_dir:         "/var/www/glpi"
+glpi_log_dir:             "/var/log/glpi"
+glpi_user:                "www-data"
+glpi_group:               "www-data"
+
+glpi_http_port:           80
+glpi_https_port:          443
+glpi_hostname:            "itsm.example.com"
+
+glpi_db_host:             "10.0.50.12"
+glpi_db_port:             3306
+glpi_db_name:             "glpi"
+glpi_db_user:             "glpi"
+
+glpi_keycloak_url:        "https://id.example.com"
+glpi_keycloak_realm:      "it-stack"
+glpi_saml_client:         "glpi"
+
+glpi_php_memory_limit:    "256M"
+glpi_cron_interval:       1
+
+glpi_smtp_host:           "10.0.50.14"
+glpi_smtp_port:           25
+
+glpi_zammad_api_url:      "http://10.0.50.14:3000"
+glpi_snipeit_api_url:     "http://10.0.50.18"
+
+glpi_firewall_ports:
+  - { port: "80",  proto: tcp, from: "10.0.50.0/24" }
+  - { port: "443", proto: tcp, from: "10.0.50.0/24" }

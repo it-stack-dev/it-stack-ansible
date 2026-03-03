@@ -1,0 +1,39 @@
+---
+# roles/iredmail/defaults/main.yml
+
+iredmail_version:          "1.6.8"
+iredmail_install_dir:      "/opt/iredmail"
+iredmail_hostname:         "mail.example.com"
+iredmail_domain:           "example.com"
+
+iredmail_backend:          "pgsql"       # or: mysql/ldap
+iredmail_db_host:          "10.0.50.12"
+iredmail_db_port:          5432
+
+iredmail_first_domain:     "example.com"
+iredmail_admin_username:   "postmaster"
+
+iredmail_enable_fail2ban:    true
+iredmail_enable_clamav:      true
+iredmail_enable_spamassassin: true
+iredmail_enable_greylisting:  true
+
+iredmail_smtpd_port:       25
+iredmail_submission_port:  587
+iredmail_smtps_port:       465
+iredmail_imap_port:        143
+iredmail_imaps_port:       993
+iredmail_pop3_port:        110
+iredmail_pop3s_port:       995
+iredmail_roundcube_port:   443
+
+iredmail_spam_threshold:   6.0
+iredmail_max_message_size: 52428800   # 50 MB
+
+iredmail_firewall_ports:
+  - { port: "25",  proto: tcp, from: "0.0.0.0/0" }
+  - { port: "587", proto: tcp, from: "0.0.0.0/0" }
+  - { port: "465", proto: tcp, from: "0.0.0.0/0" }
+  - { port: "143", proto: tcp, from: "10.0.50.0/24" }
+  - { port: "993", proto: tcp, from: "10.0.50.0/24" }
+  - { port: "443", proto: tcp, from: "10.0.50.0/24" }
