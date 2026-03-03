@@ -1,0 +1,80 @@
+{
+  "clientId": "{{ _saml_client.client_id }}",
+  "name": "{{ _saml_client.description | default(_saml_client.client_id | capitalize + ' SAML SSO') }}",
+  "description": "IT-Stack SAML SSO client managed by Ansible (INT-04)",
+  "enabled": true,
+  "protocol": "saml",
+  "publicClient": false,
+  "frontchannelLogout": true,
+  "redirectUris": {{ _saml_client.redirect_uris | default([_saml_client.acs_url]) | to_json }},
+  "attributes": {
+    "saml.authn.statement": "true",
+    "saml.server.signature": "true",
+    "saml.signature.algorithm": "RSA_SHA256",
+    "saml.assertion.signature": "true",
+    "saml.encrypt": "false",
+    "saml.client.signature": "false",
+    "saml.force.post.binding": "true",
+    "saml.multivalued.roles": "false",
+    "saml.onetimeuse.condition": "false",
+    "saml_name_id_format": "username",
+    "saml.assertion.consumer.url.post": "{{ _saml_client.acs_url }}",
+    "saml.sp.sls.url": "{{ _saml_client.slo_url | default(_saml_client.acs_url) }}"
+  },
+  "protocolMappers": [
+    {
+      "name": "username",
+      "protocol": "saml",
+      "protocolMapper": "saml-user-property-mapper",
+      "config": {
+        "attribute.name": "uid",
+        "attribute.nameformat": "Basic",
+        "user.attribute": "username",
+        "friendly.name": "uid"
+      }
+    },
+    {
+      "name": "email",
+      "protocol": "saml",
+      "protocolMapper": "saml-user-property-mapper",
+      "config": {
+        "attribute.name": "mail",
+        "attribute.nameformat": "Basic",
+        "user.attribute": "email",
+        "friendly.name": "mail"
+      }
+    },
+    {
+      "name": "given_name",
+      "protocol": "saml",
+      "protocolMapper": "saml-user-property-mapper",
+      "config": {
+        "attribute.name": "givenName",
+        "attribute.nameformat": "Basic",
+        "user.attribute": "firstName",
+        "friendly.name": "givenName"
+      }
+    },
+    {
+      "name": "family_name",
+      "protocol": "saml",
+      "protocolMapper": "saml-user-property-mapper",
+      "config": {
+        "attribute.name": "sn",
+        "attribute.nameformat": "Basic",
+        "user.attribute": "lastName",
+        "friendly.name": "sn"
+      }
+    },
+    {
+      "name": "groups",
+      "protocol": "saml",
+      "protocolMapper": "saml-group-idp-mapper",
+      "config": {
+        "attribute.name": "groups",
+        "attribute.nameformat": "Basic",
+        "single": "false"
+      }
+    }
+  ]
+}

@@ -1,0 +1,75 @@
+---
+# roles/keycloak/tasks/saml-clients.yml
+# INT-04: Provision SAML clients in Keycloak for all services in keycloak_saml_clients.
+#
+# Each item in keycloak_saml_clients must have:
+#   client_id       — Keycloak client ID (e.g. "suitecrm")
+#   acs_url         — SAML Assertion Consumer Service URL (POST binding)
+#   slo_url         — SAML Single Logout URL
+#   redirect_uris   — list of redirect URI patterns
+#   description     — human-readable label (optional)
+#
+# Tags: keycloak, integration, saml-clients
+
+- name: "SAML clients: Get Keycloak admin token"
+  ansible.builtin.uri:
+    url: "http://localhost:{{ keycloak_http_port }}/realms/master/protocol/openid-connect/token"
+    method: POST
+    body_format: form-urlencoded
+    body:
+      client_id: admin-cli
+      grant_type: password
+      username: "{{ keycloak_admin_user }}"
+      password: "{{ vault_keycloak_admin_password }}"
+    status_code: 200
+    return_content: true
+  register: _kc_saml_tok
+  no_log: true
+
+- name: "SAML clients: Set admin token fact"
+  ansible.builtin.set_fact:
+    _kc_saml_admin_token: "{{ _kc_saml_tok.json.access_token }}"
+  no_log: true
+
+- name: "SAML clients: Fetch existing clients in realm {{ keycloak_realm }}"
+  ansible.builtin.uri:
+    url: "http://localhost:{{ keycloak_http_port }}/admin/realms/{{ keycloak_realm }}/clients?max=200"
+    headers:
+      Authorization: "Bearer {{ _kc_saml_admin_token }}"
+    status_code: 200
+    return_content: true
+  register: _kc_existing_clients
+
+- name: "SAML clients: Build list of existing clientId values"
+  ansible.builtin.set_fact:
+    _kc_existing_client_ids: "{{ _kc_existing_clients.json | map(attribute='clientId') | list }}"
+
+- name: "SAML clients: Provision each SAML client"
+  ansible.builtin.uri:
+    url: "http://localhost:{{ keycloak_http_port }}/admin/realms/{{ keycloak_realm }}/clients"
+    method: POST
+    headers:
+      Authorization: "Bearer {{ _kc_saml_admin_token }}"
+      Content-Type: application/json
+    body_format: json
+    body: "{{ lookup('template', 'saml-client.json.j2') | from_json }}"
+    status_code: [201, 409]
+  loop: "{{ keycloak_saml_clients }}"
+  loop_control:
+    loop_var: _saml_client
+    label: "{{ _saml_client.client_id }}"
+  when: _saml_client.client_id not in _kc_existing_client_ids
+
+- name: "SAML clients: Verify each SAML client exists post-provision"
+  ansible.builtin.uri:
+    url: "http://localhost:{{ keycloak_http_port }}/admin/realms/{{ keycloak_realm }}/clients?clientId={{ _saml_client.client_id }}"
+    headers:
+      Authorization: "Bearer {{ _kc_saml_admin_token }}"
+    status_code: 200
+    return_content: true
+  register: _kc_verify
+  failed_when: _kc_verify.json | length == 0
+  loop: "{{ keycloak_saml_clients }}"
+  loop_control:
+    loop_var: _saml_client
+    label: "{{ _saml_client.client_id }}"

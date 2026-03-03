@@ -8,3 +8,8 @@
 - name: "Import suitecrm configuration tasks"
   ansible.builtin.import_tasks: configure.yml
   tags: [suitecrm, configure]
+
+- name: "INT-04: Import Keycloak SAML integration tasks"
+  ansible.builtin.import_tasks: keycloak-saml.yml
+  tags: [suitecrm, integration, keycloak-saml]
+  when: suitecrm_enable_keycloak_saml | default(true) | bool

@@ -1,0 +1,73 @@
+<?php
+/**
+ * SuiteCRM SAML 2.0 Authentication Settings
+ * INT-04: SuiteCRM ↔ Keycloak SAML SSO
+ *
+ * Managed by Ansible — do not edit manually.
+ * Template: roles/suitecrm/templates/saml_settings.php.j2
+ *
+ * This file is loaded by SuiteCRM's onelogin/php-saml library.
+ * Rebuild extensions after deploying: Admin → Repair → Quick Repair and Rebuild
+ */
+
+$saml_settings = array(
+    // ── Identity Provider (Keycloak) ──────────────────────────────────────────
+    'idp' => array(
+        'entityId' => '{{ suitecrm_keycloak_url }}/realms/{{ suitecrm_keycloak_realm }}',
+        'singleSignOnService' => array(
+            'url'     => '{{ suitecrm_keycloak_url }}/realms/{{ suitecrm_keycloak_realm }}/protocol/saml',
+            'binding' => 'urn:oasis:names:tc:SAML:2.0:bindings:HTTP-Redirect',
+        ),
+        'singleLogoutService' => array(
+            'url'     => '{{ suitecrm_keycloak_url }}/realms/{{ suitecrm_keycloak_realm }}/protocol/saml',
+            'binding' => 'urn:oasis:names:tc:SAML:2.0:bindings:HTTP-Redirect',
+        ),
+        // x509cert extracted from Keycloak IdP descriptor at provisioning time
+        'x509cert' => '{{ _keycloak_idp_cert | default("") }}',
+    ),
+
+    // ── Service Provider (SuiteCRM) ───────────────────────────────────────────
+    'sp' => array(
+        'entityId' => 'https://{{ suitecrm_hostname }}/index.php?entryPoint=SamlMetadata',
+        'assertionConsumerService' => array(
+            'url'     => 'https://{{ suitecrm_hostname }}/index.php?module=Users&action=Authenticate',
+            'binding' => 'urn:oasis:names:tc:SAML:2.0:bindings:HTTP-POST',
+        ),
+        'singleLogoutService' => array(
+            'url'     => 'https://{{ suitecrm_hostname }}/index.php?module=Users&action=Logout',
+            'binding' => 'urn:oasis:names:tc:SAML:2.0:bindings:HTTP-Redirect',
+        ),
+        'NameIDFormat' => 'urn:oasis:names:tc:SAML:1.1:nameid-format:unspecified',
+        'x509cert' => '',    // SP signing cert — leave empty unless client-side signing required
+        'privateKey' => '',
+    ),
+
+    // ── Security settings ─────────────────────────────────────────────────────
+    'security' => array(
+        'nameIdEncrypted'         => false,
+        'authnRequestsSigned'     => false,
+        'logoutRequestSigned'     => false,
+        'logoutResponseSigned'    => false,
+        'signMetadata'            => false,
+        'wantMessagesSigned'      => false,
+        'wantAssertionsSigned'    => true,
+        'wantNameIdEncrypted'     => false,
+        'requestedAuthnContext'   => false,
+        'signatureAlgorithm'      => 'http://www.w3.org/2001/04/xmldsig-more#rsa-sha256',
+        'digestAlgorithm'         => 'http://www.w3.org/2001/04/xmlenc#sha256',
+    ),
+
+    // ── Attribute Mapping (SAML attribute → SuiteCRM field) ──────────────────
+    'attrMap' => array(
+        'user_name'  => 'uid',
+        'email1'     => 'mail',
+        'first_name' => 'givenName',
+        'last_name'  => 'sn',
+        'title'      => 'title',
+    ),
+
+    // ── Auto-provisioning ─────────────────────────────────────────────────────
+    'autoCreateUsers'  => true,
+    'defaultUserType'  => 'RegularUser',
+    'autoCreateAdminIfNoUsers' => false,
+);

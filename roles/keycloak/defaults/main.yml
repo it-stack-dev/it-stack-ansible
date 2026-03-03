@@ -53,3 +53,23 @@ keycloak_oidc_clients:
   - client_id: taiga
     redirect_uri: "https://pm.example.com/*"
     origin: "https://pm.example.com"
+
+keycloak_saml_clients:
+  - client_id: suitecrm
+    description: "SuiteCRM CRM SAML SSO"
+    acs_url: "https://crm.example.com/index.php?module=Users&action=Authenticate"
+    slo_url: "https://crm.example.com/index.php?module=Users&action=Logout"
+    redirect_uris:
+      - "https://crm.example.com/*"
+  - client_id: glpi
+    description: "GLPI ITSM SAML SSO"
+    acs_url: "https://itsm.example.com/front/oidc.callback.php"
+    slo_url: "https://itsm.example.com/front/logout.php"
+    redirect_uris:
+      - "https://itsm.example.com/*"
+  - client_id: snipeit
+    description: "Snipe-IT Assets SAML SSO"
+    acs_url: "https://assets.example.com/auth/saml2/acs"
+    slo_url: "https://assets.example.com/auth/saml2/sls"
+    redirect_uris:
+      - "https://assets.example.com/*"

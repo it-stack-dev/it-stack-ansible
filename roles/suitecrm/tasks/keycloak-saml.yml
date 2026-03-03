@@ -1,0 +1,98 @@
+---
+# roles/suitecrm/tasks/keycloak-saml.yml
+# INT-04: Configure SuiteCRM SAML 2.0 SSO via Keycloak.
+#
+# Approach:
+#   1. Verify Keycloak SAML IdP metadata is reachable
+#   2. Deploy SuiteCRM SAML PHP config template (onelogin/php-saml)
+#      → custom/Extension/application/Ext/Config/saml_settings.php
+#   3. Set SAML auth config in SuiteCRM config.php via php CLI
+#   4. Trigger SuiteCRM extension rebuild
+#   5. Assert SAML metadata SP endpoint returns XML
+#   6. Assert Keycloak IdP descriptor endpoint reachable
+#
+# Tags: suitecrm, integration, keycloak-saml
+
+- name: "INT-04: Verify Keycloak SAML IdP descriptor reachable from SuiteCRM host"
+  ansible.builtin.uri:
+    url: "{{ suitecrm_keycloak_url }}/realms/{{ suitecrm_keycloak_realm }}/protocol/saml/descriptor"
+    status_code: 200
+    return_content: true
+  register: _kc_idp_descriptor
+  retries: 5
+  delay: 10
+  until: _kc_idp_descriptor.status == 200
+
+- name: "INT-04: Assert IdP descriptor contains SAML metadata"
+  ansible.builtin.assert:
+    that:
+      - "'EntityDescriptor' in _kc_idp_descriptor.content"
+      - "'IDPSSODescriptor' in _kc_idp_descriptor.content"
+    fail_msg: "Keycloak SAML IdP descriptor missing required EntityDescriptor/IDPSSODescriptor"
+
+- name: "INT-04: Extract Keycloak IdP X.509 certificate from descriptor"
+  ansible.builtin.set_fact:
+    _keycloak_idp_cert: >-
+      {{ _kc_idp_descriptor.content
+         | regex_search('<ds:X509Certificate>([^<]+)</ds:X509Certificate>', '\\1')
+         | first | default('') }}
+
+- name: "INT-04: Set SAML directory paths"
+  ansible.builtin.set_fact:
+    _suitecrm_saml_config_dir: "{{ suitecrm_install_dir }}/custom/Extension/application/Ext/Config"
+    _suitecrm_cache_repairdir:  "{{ suitecrm_install_dir }}/cache/extensions"
+
+- name: "INT-04: Ensure SuiteCRM SAML config directory exists"
+  ansible.builtin.file:
+    path: "{{ _suitecrm_saml_config_dir }}"
+    state: directory
+    owner: "{{ suitecrm_user }}"
+    group: "{{ suitecrm_group }}"
+    mode: "0755"
+
+- name: "INT-04: Deploy SuiteCRM SAML settings PHP file"
+  ansible.builtin.template:
+    src: saml_settings.php.j2
+    dest: "{{ _suitecrm_saml_config_dir }}/suitecrm_saml_settings.php"
+    owner: "{{ suitecrm_user }}"
+    group: "{{ suitecrm_group }}"
+    mode: "0640"
+  notify: rebuild suitecrm extensions
+
+- name: "INT-04: Enable SAML authentication in SuiteCRM config.php"
+  ansible.builtin.lineinfile:
+    path: "{{ suitecrm_install_dir }}/config.php"
+    line: "{{ item }}"
+    insertbefore: "^\\?>"
+    state: present
+  loop:
+    - "$sugar_config['saml']['enabled'] = true;"
+    - "$sugar_config['saml']['loginButtonLabel'] = 'Sign in with IT-Stack SSO';"
+    - "$sugar_config['saml']['autoCreateUsers'] = true;"
+
+- name: "INT-04: Trigger SuiteCRM extension rebuild via php"
+  ansible.builtin.command:
+    cmd: "php -r \"define('sugarEntry', true); chdir('{{ suitecrm_install_dir }}'); require_once('include/entryPoint.php'); require_once('ModuleInstall/ModuleInstaller.php'); $mi = new ModuleInstaller(); $mi->rebuild_extensions();\""
+    chdir: "{{ suitecrm_install_dir }}"
+  become: true
+  become_user: "{{ suitecrm_user }}"
+  changed_when: true
+  ignore_errors: true   # non-fatal: SP metadata may still work after restart
+
+- name: "INT-04: Verify SuiteCRM SAML SP metadata endpoint"
+  ansible.builtin.uri:
+    url: "https://{{ suitecrm_hostname }}/index.php?entryPoint=SamlMetadata"
+    status_code: 200
+    return_content: true
+    validate_certs: "{{ suitecrm_validate_ssl | default(false) }}"
+  register: _sc_sp_metadata
+  retries: 5
+  delay: 10
+  until: _sc_sp_metadata.status == 200
+
+- name: "INT-04: Assert SuiteCRM SP metadata contains EntityDescriptor"
+  ansible.builtin.assert:
+    that:
+      - "'EntityDescriptor' in _sc_sp_metadata.content"
+      - "'AssertionConsumerService' in _sc_sp_metadata.content"
+    fail_msg: "SuiteCRM SP metadata missing EntityDescriptor or AssertionConsumerService"

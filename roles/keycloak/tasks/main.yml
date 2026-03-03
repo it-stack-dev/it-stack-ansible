@@ -22,3 +22,8 @@
   ansible.builtin.import_tasks: oidc-clients.yml
   tags: [keycloak, integration, oidc-clients]
   when: keycloak_provision_oidc_clients | default(true) | bool
+
+- name: "INT-04+: Import SAML client provisioning tasks"
+  ansible.builtin.import_tasks: saml-clients.yml
+  tags: [keycloak, integration, saml-clients]
+  when: keycloak_provision_saml_clients | default(true) | bool
