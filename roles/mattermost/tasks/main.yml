@@ -8,3 +8,8 @@
 - name: "Import mattermost configuration tasks"
   ansible.builtin.import_tasks: configure.yml
   tags: [mattermost, configure]
+
+- name: "INT-03: Import Keycloak OIDC integration tasks"
+  ansible.builtin.import_tasks: keycloak-oidc.yml
+  tags: [mattermost, integration, keycloak-oidc]
+  when: mattermost_enable_keycloak_oidc | default(true) | bool

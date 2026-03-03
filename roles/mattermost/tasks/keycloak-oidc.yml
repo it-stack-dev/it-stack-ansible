@@ -1,0 +1,172 @@
+---
+# roles/mattermost/tasks/keycloak-oidc.yml
+# INT-03: Configure Mattermost OIDC login via Keycloak using the REST API.
+#
+# Prerequisites:
+#   - Mattermost is installed and /api/v4/system/ping returns OK
+#   - Keycloak realm exists and the 'mattermost' OIDC client has been created
+#   - keycloak_client_secrets['mattermost'] fact is set (by keycloak/oidc-clients.yml)
+#     OR vault_mattermost_oidc_secret is defined in vault
+#   - vault_mattermost_admin_user / vault_mattermost_admin_password defined
+#
+# Mattermost OIDC uses MM_OPENIDSETTINGS_* env vars at startup; this task also
+# patches running config via REST API so changes take effect without restart.
+#
+# Tags: mattermost, integration, keycloak-oidc
+
+- name: "INT-03: Set Mattermost API base URL"
+  ansible.builtin.set_fact:
+    _mm_api: "http://localhost:{{ mattermost_port }}/api/v4"
+    _mm_oidc_secret: >-
+      {{ keycloak_client_secrets['mattermost']
+         | default(vault_mattermost_oidc_secret) }}
+    _mm_discovery_url: >-
+      {{ mattermost_keycloak_url }}/realms/{{ mattermost_keycloak_realm }}/.well-known/openid-configuration
+  no_log: true
+
+- name: "INT-03: Wait for Mattermost API to be ready"
+  ansible.builtin.uri:
+    url: "{{ _mm_api }}/system/ping"
+    status_code: 200
+    return_content: true
+  register: _mm_ping
+  retries: 18
+  delay: 10
+  until: _mm_ping.json.status == 'OK'
+
+- name: "INT-03: Get Mattermost admin auth token"
+  ansible.builtin.uri:
+    url: "{{ _mm_api }}/users/login"
+    method: POST
+    body_format: json
+    body:
+      login_id:  "{{ vault_mattermost_admin_user }}"
+      password:  "{{ vault_mattermost_admin_password }}"
+    status_code: 200
+    return_content: true
+  register: _mm_login
+  no_log: true
+
+- name: "INT-03: Set Mattermost admin token fact"
+  ansible.builtin.set_fact:
+    _mm_token: "{{ _mm_login.token }}"
+  no_log: true
+
+# ── Patch OIDC (OpenID Connect) settings ──────────────────────────────────────
+
+- name: "INT-03: Fetch current Mattermost config"
+  ansible.builtin.uri:
+    url: "{{ _mm_api }}/config"
+    headers:
+      Authorization: "Bearer {{ _mm_token }}"
+    status_code: 200
+    return_content: true
+  register: _mm_config_current
+  no_log: true
+
+- name: "INT-03: Patch OpenID Connect settings"
+  ansible.builtin.uri:
+    url: "{{ _mm_api }}/config/patch"
+    method: PUT
+    headers:
+      Authorization: "Bearer {{ _mm_token }}"
+      Content-Type:  "application/json"
+    body_format: json
+    body:
+      ServiceSettings:
+        SiteURL: "https://{{ mattermost_hostname }}"
+      OpenIdSettings:
+        Enable:            true
+        Secret:            "{{ _mm_oidc_secret }}"
+        Id:                "{{ mattermost_oidc_client }}"
+        DiscoveryEndpoint: "{{ _mm_discovery_url }}"
+        ButtonText:        "Login with Keycloak"
+        ButtonColor:       "#0070ba"
+    status_code: 200
+  no_log: true
+
+# ── Patch LDAP settings (FreeIPA DN paths) ─────────────────────────────────────
+
+- name: "INT-03: Patch LDAP settings (FreeIPA)"
+  ansible.builtin.uri:
+    url: "{{ _mm_api }}/config/patch"
+    method: PUT
+    headers:
+      Authorization: "Bearer {{ _mm_token }}"
+      Content-Type:  "application/json"
+    body_format: json
+    body:
+      LdapSettings:
+        Enable:              true
+        LdapServer:          "10.0.50.11"
+        LdapPort:            389
+        BaseDN:              "cn=users,cn=accounts,dc=internal,dc=example,dc=com"
+        BindUsername:        "uid=keycloak-svc,cn=users,cn=accounts,dc=internal,dc=example,dc=com"
+        BindPassword:        "{{ vault_keycloak_ldap_bind_password }}"
+        UserFilter:          "(objectClass=inetOrgPerson)"
+        IdAttribute:         "uid"
+        UsernameAttribute:   "uid"
+        EmailAttribute:      "mail"
+        FirstNameAttribute:  "givenName"
+        LastNameAttribute:   "sn"
+        LoginIdAttribute:    "uid"
+        SyncIntervalMinutes: 60
+        QueryTimeout:        60
+        MaxPageSize:         0
+        SkipCertificateVerification: false
+    status_code: 200
+  no_log: true
+
+# ── Trigger LDAP sync ─────────────────────────────────────────────────────────
+
+- name: "INT-03: Trigger Mattermost LDAP sync"
+  ansible.builtin.uri:
+    url: "{{ _mm_api }}/ldap/sync"
+    method: POST
+    headers:
+      Authorization: "Bearer {{ _mm_token }}"
+    status_code: 200
+
+# ── Verification ──────────────────────────────────────────────────────────────
+
+- name: "INT-03: Re-fetch config to verify OIDC settings applied"
+  ansible.builtin.uri:
+    url: "{{ _mm_api }}/config"
+    headers:
+      Authorization: "Bearer {{ _mm_token }}"
+    status_code: 200
+    return_content: true
+  register: _mm_config_verify
+  no_log: false   # non-secret, needed for assert message
+
+- name: "INT-03: Assert OpenID Connect is enabled"
+  ansible.builtin.assert:
+    that:
+      - _mm_config_verify.json.OpenIdSettings.Enable | bool
+      - _mm_config_verify.json.OpenIdSettings.Id == mattermost_oidc_client
+      - _mm_config_verify.json.OpenIdSettings.DiscoveryEndpoint != ''
+    fail_msg: "Mattermost OIDC settings not applied — check API response"
+
+- name: "INT-03: Verify Keycloak OIDC discovery URL is reachable from Mattermost host"
+  ansible.builtin.uri:
+    url: "{{ _mm_discovery_url }}"
+    status_code: 200
+    return_content: true
+  register: _mm_discovery_check
+  retries: 3
+  delay: 5
+
+- name: "INT-03: Assert discovery URL has required OIDC fields"
+  ansible.builtin.assert:
+    that:
+      - "'authorization_endpoint' in _mm_discovery_check.content"
+      - "'token_endpoint' in _mm_discovery_check.content"
+      - "'jwks_uri' in _mm_discovery_check.content"
+    fail_msg: "Keycloak OIDC discovery response missing required fields for Mattermost"
+
+- name: "INT-03: Assert LDAP is enabled in Mattermost config"
+  ansible.builtin.assert:
+    that:
+      - _mm_config_verify.json.LdapSettings.Enable | bool
+      - _mm_config_verify.json.LdapSettings.LdapServer != ''
+    fail_msg: "Mattermost LDAP settings not applied"
