@@ -1,0 +1,82 @@
+{
+  "clientId":                    "{{ client_id }}",
+  "name":                        "{{ client_name | default(client_id | capitalize) }}",
+  "description":                 "{{ client_description | default('OIDC client for ' + client_id) }}",
+  "protocol":                    "openid-connect",
+  "enabled":                     true,
+  "publicClient":                false,
+  "bearerOnly":                  false,
+  "standardFlowEnabled":         true,
+  "implicitFlowEnabled":         false,
+  "directAccessGrantsEnabled":   false,
+  "serviceAccountsEnabled":      true,
+  "authorizationServicesEnabled": false,
+  "fullScopeAllowed":            true,
+  "frontchannelLogout":          false,
+  "redirectUris":                ["{{ redirect_uri }}"],
+  "webOrigins":                  ["{{ origin }}"],
+  "attributes": {
+    "access.token.lifespan":  "300",
+    "backchannel.logout.session.required": "true",
+    "backchannel.logout.revoke.offline.tokens": "false",
+    "login_theme": "keycloak",
+    "post.logout.redirect.uris": "+"
+  },
+  "protocolMappers": [
+    {
+      "name":           "email",
+      "protocol":       "openid-connect",
+      "protocolMapper": "oidc-usermodel-property-mapper",
+      "consentRequired": false,
+      "config": {
+        "claim.name":          "email",
+        "user.attribute":      "email",
+        "id.token.claim":      "true",
+        "access.token.claim":  "true",
+        "userinfo.token.claim":"true",
+        "jsonType.label":      "String"
+      }
+    },
+    {
+      "name":           "given name",
+      "protocol":       "openid-connect",
+      "protocolMapper": "oidc-usermodel-property-mapper",
+      "consentRequired": false,
+      "config": {
+        "claim.name":          "given_name",
+        "user.attribute":      "firstName",
+        "id.token.claim":      "true",
+        "access.token.claim":  "true",
+        "userinfo.token.claim":"true",
+        "jsonType.label":      "String"
+      }
+    },
+    {
+      "name":           "family name",
+      "protocol":       "openid-connect",
+      "protocolMapper": "oidc-usermodel-property-mapper",
+      "consentRequired": false,
+      "config": {
+        "claim.name":          "family_name",
+        "user.attribute":      "lastName",
+        "id.token.claim":      "true",
+        "access.token.claim":  "true",
+        "userinfo.token.claim":"true",
+        "jsonType.label":      "String"
+      }
+    },
+    {
+      "name":           "groups",
+      "protocol":       "openid-connect",
+      "protocolMapper": "oidc-group-membership-mapper",
+      "consentRequired": false,
+      "config": {
+        "claim.name":          "groups",
+        "full.path":           "false",
+        "id.token.claim":      "true",
+        "access.token.claim":  "true",
+        "userinfo.token.claim":"true"
+      }
+    }
+  ]
+}

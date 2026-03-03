@@ -1,0 +1,151 @@
+---
+# roles/keycloak/tasks/oidc-clients.yml
+# INT-02+: Create confidential OIDC clients in the it-stack realm for all
+# integrated services.  Idempotent — skips creation when the client already
+# exists; always rotates/retrieves the client secret so downstream roles have
+# the value in keycloak_client_secrets[client_id].
+#
+# Depends on: realm.yml having already created the realm and kcadm creds cached.
+# Tags: keycloak, integration, oidc-clients
+#
+# Outputs (set_fact):
+#   keycloak_client_secrets  — dict  { "nextcloud": "abc...", "mattermost": "xyz..." }
+
+- name: "INT-02+: Ensure kcadm facts are set"
+  ansible.builtin.set_fact:
+    kcadm:    "{{ keycloak_install_dir }}/current/bin/kcadm.sh"
+    kc_server: "http://localhost:{{ keycloak_http_port }}"
+  when: kcadm is not defined
+
+- name: "INT-02+: Authenticate kcadm (OIDC clients)"
+  ansible.builtin.command:
+    cmd: >
+      {{ kcadm }} config credentials
+      --server {{ kc_server }}
+      --realm master
+      --user {{ vault_keycloak_admin_user }}
+      --password {{ vault_keycloak_admin_password }}
+  changed_when: false
+  no_log: true
+  become_user: "{{ keycloak_user }}"
+
+- name: "INT-02+: Retrieve existing OIDC clients in {{ keycloak_realm }}"
+  ansible.builtin.command:
+    cmd: >
+      {{ kcadm }} get clients
+      --server {{ kc_server }}
+      -r {{ keycloak_realm }}
+      --fields clientId
+  register: existing_clients_raw
+  changed_when: false
+  become_user: "{{ keycloak_user }}"
+
+- name: "INT-02+: Build list of existing client IDs"
+  ansible.builtin.set_fact:
+    _existing_client_ids: >-
+      {{ existing_clients_raw.stdout | from_json
+         | map(attribute='clientId') | list }}
+
+# ── Create each missing client ─────────────────────────────────────────────────
+
+- name: "INT-02+: Create OIDC client '{{ item.client_id }}' (if absent)"
+  ansible.builtin.command:
+    cmd: >
+      {{ kcadm }} create clients
+      --server {{ kc_server }}
+      -r {{ keycloak_realm }}
+      -s "clientId={{ item.client_id }}"
+      -s "name={{ item.client_id | capitalize }}"
+      -s "protocol=openid-connect"
+      -s "enabled=true"
+      -s "publicClient=false"
+      -s "standardFlowEnabled=true"
+      -s "implicitFlowEnabled=false"
+      -s "directAccessGrantsEnabled=false"
+      -s "serviceAccountsEnabled=true"
+      -s 'redirectUris=["{{ item.redirect_uri }}"]'
+      -s 'webOrigins=["{{ item.origin }}"]'
+      -s 'attributes={"access.token.lifespan": "300", "login_theme": "keycloak"}'
+  when: item.client_id not in _existing_client_ids
+  become_user: "{{ keycloak_user }}"
+  loop: "{{ keycloak_oidc_clients }}"
+  loop_control:
+    label: "{{ item.client_id }}"
+
+# ── Add protocol mappers for each client ─────────────────────────────────────
+
+- name: "INT-02+: Get UUID for '{{ item.client_id }}'"
+  ansible.builtin.shell: |
+    set -o pipefail
+    {{ kcadm }} get clients --server {{ kc_server }} -r {{ keycloak_realm }} \
+      --query "clientId={{ item.client_id }}" \
+      | python3 -c "import sys,json; cs=json.load(sys.stdin); print(cs[0]['id'])"
+  register: _client_uuid_raw
+  changed_when: false
+  become_user: "{{ keycloak_user }}"
+  loop: "{{ keycloak_oidc_clients }}"
+  loop_control:
+    label: "{{ item.client_id }}"
+
+- name: "INT-02+: Set client UUID map"
+  ansible.builtin.set_fact:
+    _client_uuid_map: >-
+      {{ _client_uuid_map | default({})
+         | combine({ item.item.client_id: item.stdout | trim }) }}
+  loop: "{{ _client_uuid_raw.results }}"
+  loop_control:
+    label: "{{ item.item.client_id }}"
+
+- name: "INT-02+: Add email mapper to '{{ item.client_id }}' (idempotent)"
+  ansible.builtin.command:
+    cmd: >
+      {{ kcadm }} create clients/{{ _client_uuid_map[item.client_id] }}/protocol-mappers/models
+      --server {{ kc_server }}
+      -r {{ keycloak_realm }}
+      -s "name=email"
+      -s "protocol=openid-connect"
+      -s "protocolMapper=oidc-usermodel-property-mapper"
+      -s 'config={"claim.name":"email","user.attribute":"email","id.token.claim":"true","access.token.claim":"true","userinfo.token.claim":"true","jsonType.label":"String"}'
+  register: add_email_mapper
+  failed_when: >
+    add_email_mapper.rc != 0 and
+    'already exists' not in (add_email_mapper.stderr | default(''))
+  changed_when: add_email_mapper.rc == 0
+  become_user: "{{ keycloak_user }}"
+  loop: "{{ keycloak_oidc_clients }}"
+  loop_control:
+    label: "{{ item.client_id }}"
+
+# ── Retrieve / rotate client secrets ─────────────────────────────────────────
+
+- name: "INT-02+: Retrieve client secret for '{{ item.client_id }}'"
+  ansible.builtin.shell: |
+    set -o pipefail
+    {{ kcadm }} get clients/{{ _client_uuid_map[item.client_id] }}/client-secret \
+      --server {{ kc_server }} -r {{ keycloak_realm }} \
+      | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('value',''))"
+  register: _client_secret_raw
+  changed_when: false
+  no_log: true
+  become_user: "{{ keycloak_user }}"
+  loop: "{{ keycloak_oidc_clients }}"
+  loop_control:
+    label: "{{ item.client_id }}"
+
+- name: "INT-02+: Build keycloak_client_secrets dict"
+  ansible.builtin.set_fact:
+    keycloak_client_secrets: >-
+      {{ keycloak_client_secrets | default({})
+         | combine({ item.item.client_id: item.stdout | trim }) }}
+  no_log: true
+  loop: "{{ _client_secret_raw.results }}"
+  loop_control:
+    label: "{{ item.item.client_id }}"
+
+- name: "INT-02+: Assert all client secrets populated"
+  ansible.builtin.assert:
+    that: "keycloak_client_secrets[item.client_id] | length > 0"
+    fail_msg: "Empty client secret for {{ item.client_id }}"
+  loop: "{{ keycloak_oidc_clients }}"
+  loop_control:
+    label: "{{ item.client_id }}"

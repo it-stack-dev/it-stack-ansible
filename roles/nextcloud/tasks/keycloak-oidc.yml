@@ -1,0 +1,136 @@
+---
+# roles/nextcloud/tasks/keycloak-oidc.yml
+# INT-02: Configure Nextcloud OIDC login via Keycloak using the user_oidc app.
+#
+# Prerequisites:
+#   - Nextcloud is installed and occ is available
+#   - Keycloak realm exists and the 'nextcloud' OIDC client has been created
+#   - keycloak_client_secrets['nextcloud'] fact is set (by keycloak/oidc-clients.yml)
+#     OR vault_nextcloud_oidc_secret is defined in vault
+#
+# Tags: nextcloud, integration, keycloak-oidc
+#
+# What this does:
+#   1. Enables the user_oidc Nextcloud app (if not already enabled)
+#   2. Deletes stale provider registration (allows idempotent re-run)
+#   3. Registers Keycloak as OIDC discovery provider with client credentials
+#   4. Verifies provider is registered and discoverable
+
+- name: "INT-02: Set occ helper fact"
+  ansible.builtin.set_fact:
+    _occ: "php {{ nextcloud_install_dir }}/occ"
+    _nc_oidc_secret: >-
+      {{ keycloak_client_secrets['nextcloud']
+         | default(vault_nextcloud_oidc_secret) }}
+  no_log: true
+
+- name: "INT-02: Check if user_oidc app is installed"
+  ansible.builtin.command:
+    cmd: "{{ _occ }} app:list --output=json"
+    chdir: "{{ nextcloud_install_dir }}"
+  register: _nc_apps
+  changed_when: false
+  become_user: "{{ nextcloud_user }}"
+
+- name: "INT-02: Install user_oidc app (if absent)"
+  ansible.builtin.command:
+    cmd: "{{ _occ }} app:install user_oidc"
+    chdir: "{{ nextcloud_install_dir }}"
+  when: "'user_oidc' not in (_nc_apps.stdout | from_json).get('enabled', {}) and
+         'user_oidc' not in (_nc_apps.stdout | from_json).get('disabled', {})"
+  become_user: "{{ nextcloud_user }}"
+
+- name: "INT-02: Enable user_oidc app"
+  ansible.builtin.command:
+    cmd: "{{ _occ }} app:enable user_oidc"
+    chdir: "{{ nextcloud_install_dir }}"
+  register: _enable_oidc
+  changed_when: "'enabled' in _enable_oidc.stdout"
+  failed_when: >
+    _enable_oidc.rc != 0 and
+    'already enabled' not in (_enable_oidc.stdout | default(''))
+  become_user: "{{ nextcloud_user }}"
+
+- name: "INT-02: Check if Keycloak OIDC provider is already registered"
+  ansible.builtin.command:
+    cmd: "{{ _occ }} user_oidc:provider --output=json"
+    chdir: "{{ nextcloud_install_dir }}"
+  register: _oidc_providers
+  changed_when: false
+  failed_when: false
+  become_user: "{{ nextcloud_user }}"
+
+- name: "INT-02: Parse existing provider list"
+  ansible.builtin.set_fact:
+    _keycloak_provider_exists: >-
+      {{ (_oidc_providers.stdout | default('[]') | from_json)
+         | selectattr('identifier', 'equalto', 'Keycloak') | list | length > 0 }}
+
+- name: "INT-02: Remove stale Keycloak provider (allows idempotent re-configure)"
+  ansible.builtin.command:
+    cmd: "{{ _occ }} user_oidc:provider --delete Keycloak"
+    chdir: "{{ nextcloud_install_dir }}"
+  when: _keycloak_provider_exists | bool
+  changed_when: true
+  become_user: "{{ nextcloud_user }}"
+
+- name: "INT-02: Register Keycloak as OIDC discovery provider"
+  ansible.builtin.command:
+    cmd: >
+      {{ _occ }} user_oidc:provider
+      Keycloak
+      --clientid={{ nextcloud_oidc_client }}
+      --clientsecret={{ _nc_oidc_secret }}
+      --discoveryuri={{ nextcloud_keycloak_url }}/realms/{{ nextcloud_keycloak_realm }}/.well-known/openid-configuration
+      --scope="openid email profile"
+      --unique-uid=0
+      --check-bearer=1
+      --send-id-token-hint=1
+    chdir: "{{ nextcloud_install_dir }}"
+  no_log: true
+  become_user: "{{ nextcloud_user }}"
+
+- name: "INT-02: Verify provider 'Keycloak' is registered"
+  ansible.builtin.command:
+    cmd: "{{ _occ }} user_oidc:provider --output=json"
+    chdir: "{{ nextcloud_install_dir }}"
+  register: _verify_providers
+  changed_when: false
+  become_user: "{{ nextcloud_user }}"
+
+- name: "INT-02: Assert Keycloak provider is present"
+  ansible.builtin.assert:
+    that:
+      - (_verify_providers.stdout | from_json) | selectattr('identifier', 'equalto', 'Keycloak') | list | length > 0
+    fail_msg: "Keycloak OIDC provider was not found after registration — check occ output"
+
+- name: "INT-02: Configure OIDC login button text"
+  ansible.builtin.command:
+    cmd: "{{ _occ }} config:app:set user_oidc button_text --value='Login with Keycloak'"
+    chdir: "{{ nextcloud_install_dir }}"
+  changed_when: true
+  become_user: "{{ nextcloud_user }}"
+
+- name: "INT-02: Allow multiple login methods (password + OIDC)"
+  ansible.builtin.command:
+    cmd: "{{ _occ }} config:app:set user_oidc allow_multiple_user_backends --value=1"
+    chdir: "{{ nextcloud_install_dir }}"
+  changed_when: true
+  become_user: "{{ nextcloud_user }}"
+
+- name: "INT-02: Verify Keycloak OIDC discovery URL is reachable from Nextcloud host"
+  ansible.builtin.uri:
+    url: "{{ nextcloud_keycloak_url }}/realms/{{ nextcloud_keycloak_realm }}/.well-known/openid-configuration"
+    status_code: 200
+    return_content: true
+  register: _discovery_check
+  retries: 3
+  delay: 5
+
+- name: "INT-02: Assert discovery URL has required OIDC fields"
+  ansible.builtin.assert:
+    that:
+      - "'authorization_endpoint' in _discovery_check.content"
+      - "'token_endpoint' in _discovery_check.content"
+      - "'jwks_uri' in _discovery_check.content"
+    fail_msg: "Keycloak OIDC discovery response missing required fields"

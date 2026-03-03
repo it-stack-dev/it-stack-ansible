@@ -8,3 +8,8 @@
 - name: "Import nextcloud configuration tasks"
   ansible.builtin.import_tasks: configure.yml
   tags: [nextcloud, configure]
+
+- name: "INT-02: Import Keycloak OIDC integration tasks"
+  ansible.builtin.import_tasks: keycloak-oidc.yml
+  tags: [nextcloud, integration, keycloak-oidc]
+  when: nextcloud_enable_keycloak_oidc | default(true) | bool

@@ -17,3 +17,8 @@
   ansible.builtin.import_tasks: ldap-federation.yml
   tags: [keycloak, integration, ldap-federation]
   when: keycloak_enable_ldap_federation | default(true) | bool
+
+- name: "INT-02+: Import OIDC client provisioning tasks"
+  ansible.builtin.import_tasks: oidc-clients.yml
+  tags: [keycloak, integration, oidc-clients]
+  when: keycloak_provision_oidc_clients | default(true) | bool
