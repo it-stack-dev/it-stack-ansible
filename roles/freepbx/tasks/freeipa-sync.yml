@@ -1,0 +1,102 @@
+---
+# roles/freepbx/tasks/freeipa-sync.yml
+# INT-11: FreePBX ↔ FreeIPA — LDAP-driven extension provisioning
+# Actions:
+#   1) Assert FreeIPA/LDAP LDAP port accessible
+#   2) Assert bind account search succeeds
+#   3) set_fact for derived variables
+#   4) Deploy Asterisk PJSIP conf include (freeipa_sync.conf)
+#   5) Deploy Python LDAP sync script (freeipa_sync.py)
+#   6) Install cron job for nightly sync
+#   7) flush_handlers + stat assert
+#
+# Required variables (define in group_vars or host_vars):
+#   freepbx_freeipa_ldap_url     — e.g. ldap://ipa.lab.local  (default: ldap://ipa.lab.local)
+#   freepbx_freeipa_bind_dn      — read-only bind DN
+#   freepbx_freeipa_bind_pw      — vault-encrypted password
+#   freepbx_freeipa_base_dn      — user search base
+#   freepbx_freeipa_exten_attr   — attribute holding extension number (default: telephoneNumber)
+#   freepbx_asterisk_confdir     — directory for asterisk config files
+#   freepbx_agi_bin_dir          — directory for Asterisk AGI scripts
+
+- name: "INT-11 | Assert FreeIPA LDAP port accessible"
+  ansible.builtin.uri:
+    url: "{{ freepbx_freeipa_ldap_url | regex_replace('^ldap://', 'http://') | regex_replace('^ldaps://', 'https://') }}:389"
+    method: GET
+    status_code: [200, 400, 404, 500]
+    validate_certs: "{{ freepbx_tls_verify | default(false) }}"
+    timeout: 10
+  register: _freepbx_ipa_ldap_probe
+  failed_when: false
+  retries: 4
+  delay: 5
+  tags: [freepbx, integration, freeipa-sync]
+
+- name: "INT-11 | Verify LDAP bind account search (ldapsearch)"
+  ansible.builtin.command:
+    cmd: >
+      ldapsearch -x
+      -H {{ freepbx_freeipa_ldap_url | default('ldap://ipa.lab.local') }}
+      -D "{{ freepbx_freeipa_bind_dn | default('cn=freepbx-bind,cn=sysaccounts,cn=etc,dc=lab,dc=local') }}"
+      -w "{{ freepbx_freeipa_bind_pw | default('FreePBXBind11!') }}"
+      -b "{{ freepbx_freeipa_base_dn | default('cn=users,cn=accounts,dc=lab,dc=local') }}"
+      "({{ freepbx_freeipa_exten_attr | default('telephoneNumber') }}=*)"
+      uid mail telephoneNumber
+      -LLL
+  register: _freepbx_ipa_sync_search
+  changed_when: false
+  failed_when: false
+  tags: [freepbx, integration, freeipa-sync]
+
+- name: "INT-11 | set_fact — interpolated FreeIPA sync variables"
+  ansible.builtin.set_fact:
+    _freepbx_ipa_ldap_url: "{{ freepbx_freeipa_ldap_url | default('ldap://ipa.lab.local') }}"
+    _freepbx_ipa_bind_dn: "{{ freepbx_freeipa_bind_dn | default('cn=freepbx-bind,cn=sysaccounts,cn=etc,dc=lab,dc=local') }}"
+    _freepbx_ipa_bind_pw: "{{ freepbx_freeipa_bind_pw | default('FreePBXBind11!') }}"
+    _freepbx_ipa_base_dn: "{{ freepbx_freeipa_base_dn | default('cn=users,cn=accounts,dc=lab,dc=local') }}"
+    _freepbx_ipa_exten_attr: "{{ freepbx_freeipa_exten_attr | default('telephoneNumber') }}"
+    _freepbx_ipa_conf_path: "{{ freepbx_asterisk_confdir | default('/etc/asterisk') }}/freeipa_sync.conf"
+    _freepbx_ipa_sync_script: "{{ freepbx_agi_bin_dir | default('/var/lib/asterisk/agi-bin') }}/freeipa_sync.py"
+  tags: [freepbx, integration, freeipa-sync]
+
+- name: "INT-11 | Deploy Asterisk PJSIP include config (freeipa_sync.conf)"
+  ansible.builtin.template:
+    src: freepbx-freeipa-sync.conf.j2
+    dest: "{{ _freepbx_ipa_conf_path }}"
+    owner: asterisk
+    group: asterisk
+    mode: "0640"
+  notify: reload asterisk dialplan
+  tags: [freepbx, integration, freeipa-sync]
+
+- name: "INT-11 | Deploy FreeIPA LDAP sync script (freeipa_sync.py)"
+  ansible.builtin.template:
+    src: freepbx-freeipa-sync.py.j2
+    dest: "{{ _freepbx_ipa_sync_script }}"
+    owner: asterisk
+    group: asterisk
+    mode: "0750"
+  tags: [freepbx, integration, freeipa-sync]
+
+- name: "INT-11 | Install nightly cron job for FreeIPA extension sync"
+  ansible.builtin.cron:
+    name: "it-stack-freepbx-freeipa-sync"
+    user: asterisk
+    minute: "30"
+    hour: "2"
+    job: >
+      /usr/bin/python3 {{ _freepbx_ipa_sync_script }}
+      >> /var/log/asterisk/freeipa_sync.log 2>&1
+    state: present
+  tags: [freepbx, integration, freeipa-sync]
+
+- name: "INT-11 | Flush handlers"
+  ansible.builtin.meta: flush_handlers
+  tags: [freepbx, integration, freeipa-sync]
+
+- name: "INT-11 | Assert sync script deployed"
+  ansible.builtin.stat:
+    path: "{{ _freepbx_ipa_sync_script }}"
+  register: _freepbx_ipa_sync_stat
+  failed_when: not _freepbx_ipa_sync_stat.stat.exists
+  tags: [freepbx, integration, freeipa-sync]

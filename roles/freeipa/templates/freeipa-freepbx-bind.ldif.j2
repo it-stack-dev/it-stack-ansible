@@ -1,0 +1,38 @@
+# =============================================================================
+# IT-Stack: FreeIPA — FreePBX Bind Service Account
+# Template: freeipa-freepbx-bind.ldif.j2
+# INT-11: FreeIPA ↔ FreePBX (extension provisioning from directory)
+#
+# Used for:
+#   - OpenLDAP-based lab environments (lab 05 compose uses osixia/openldap)
+#   - Creates a read-only service account for FreePBX LDAP sync
+#   - Not needed for full FreeIPA deployments (use ipa user-add instead)
+#
+# Apply with:
+#   ldapadd -x -H ldap://localhost -D "cn=admin,{{ _freeipa_base_dn }}"
+#            -w <admin-pw> -f /tmp/freeipa-freepbx-bind.ldif
+# =============================================================================
+
+# ── FreePBX bind service account ──────────────────────────────────────────────
+# DN: cn=freepbx-bind,cn=sysaccounts,cn=etc,{{ _freeipa_base_dn }}
+# (create the cn=sysaccounts and cn=etc containers first if not present)
+
+dn: cn=etc,{{ _freeipa_base_dn }}
+objectClass: organizationalRole
+cn: etc
+description: FreeIPA-style etc container
+changetype: add
+
+dn: cn=sysaccounts,cn=etc,{{ _freeipa_base_dn }}
+objectClass: organizationalRole
+cn: sysaccounts
+description: System service accounts
+changetype: add
+
+dn: cn=freepbx-bind,cn=sysaccounts,cn=etc,{{ _freeipa_base_dn }}
+objectClass: simpleSecurityObject
+objectClass: organizationalRole
+cn: freepbx-bind
+description: FreePBX read-only LDAP bind account for extension provisioning (INT-11)
+userPassword: {{ _freeipa_freepbx_bind_pw }}
+changetype: add

@@ -18,3 +18,8 @@
   ansible.builtin.import_tasks: zammad-webhook.yml
   tags: [freepbx, integration, zammad-webhook]
   when: freepbx_enable_zammad_webhook | default(true) | bool
+
+- name: "INT-11: Import FreeIPA extension sync tasks"
+  ansible.builtin.import_tasks: freeipa-sync.yml
+  tags: [freepbx, integration, freeipa-sync]
+  when: freepbx_enable_freeipa_sync | default(true) | bool

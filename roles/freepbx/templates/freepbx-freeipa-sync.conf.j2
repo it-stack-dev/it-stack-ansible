@@ -1,0 +1,64 @@
+; =============================================================================
+; IT-Stack: FreePBX — FreeIPA LDAP Extension Provisioning
+; Template: freepbx-freeipa-sync.conf.j2
+; INT-11: FreePBX ↔ FreeIPA (extension provisioning from directory)
+;
+; This file is managed by Ansible + freeipa_sync.py.
+; The Python script writes the [freeipa-pjsip-endpoints] section dynamically
+; after querying FreeIPA LDAP for users with a telephoneNumber attribute.
+; Re-run the sync script to refresh endpoints after directory changes.
+;
+; FreeIPA LDAP source: {{ _freepbx_ipa_ldap_url }}
+; Base DN:             {{ _freepbx_ipa_base_dn }}
+; Extension attribute: {{ _freepbx_ipa_exten_attr }}
+; =============================================================================
+
+; Global sync parameters — referenced by freeipa_sync.py
+[freeipa-sync-globals](!)
+FREEIPA_LDAP_URL={{ _freepbx_ipa_ldap_url }}
+FREEIPA_BIND_DN={{ _freepbx_ipa_bind_dn }}
+FREEIPA_BASE_DN={{ _freepbx_ipa_base_dn }}
+FREEIPA_EXTEN_ATTR={{ _freepbx_ipa_exten_attr }}
+FREEIPA_SYNC_VERSION=INT-11
+
+; Dynamic PJSIP endpoint section — populated by freeipa_sync.py
+; The script writes entries like:
+;
+; [101](freeipa-endpoint-template)
+; callerid=John Smith <101>
+; auth=101
+; aors=101
+;
+; [101](freeipa-auth-template)
+; username=101
+; password=<generated>
+;
+; [101](freeipa-aor-template)
+; max_contacts=3
+
+; PJSIP endpoint template (apply to each provisioned endpoint)
+[freeipa-endpoint-template](!)
+type=endpoint
+context=from-internal
+disallow=all
+allow=ulaw
+allow=alaw
+allow=g722
+dtmf_mode=rfc4733
+direct_media=no
+trust_id_inbound=yes
+send_pai=yes
+
+[freeipa-auth-template](!)
+type=auth
+auth_type=userpass
+
+[freeipa-aor-template](!)
+type=aor
+max_contacts=3
+remove_existing=yes
+qualify_frequency=30
+
+; #include freeipa_endpoints_dynamic.conf
+; (freeipa_sync.py writes this file with the auto-provisioned endpoints)
+#include freeipa_endpoints_dynamic.conf

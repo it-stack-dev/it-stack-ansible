@@ -1,0 +1,291 @@
+#!/usr/bin/env python3
+# =============================================================================
+# IT-Stack: FreePBX — FreeIPA LDAP Extension Provisioning Sync Script
+# Template: freepbx-freeipa-sync.py.j2  (rendered by Ansible INT-11)
+# INT-11: FreePBX ↔ FreeIPA (extension provisioning from directory)
+#
+# Usage:
+#   python3 freeipa_sync.py [--dry-run] [--verbose]
+#
+# What it does:
+#   1. Binds to FreeIPA LDAP using the freepbx-bind service account
+#   2. Searches for all users with a telephoneNumber attribute
+#   3. Generates Asterisk PJSIP endpoint config for each user
+#   4. Writes /etc/asterisk/freeipa_endpoints_dynamic.conf
+#   5. Triggers Asterisk module reload (pjsip reload) if changes detected
+#
+# Rendered variables (Ansible):
+#   FREEIPA_LDAP_URL  = {{ _freepbx_ipa_ldap_url }}
+#   FREEIPA_BIND_DN   = {{ _freepbx_ipa_bind_dn }}
+#   FREEIPA_BASE_DN   = {{ _freepbx_ipa_base_dn }}
+#   EXTEN_ATTR        = {{ _freepbx_ipa_exten_attr }}
+# =============================================================================
+
+import argparse
+import hashlib
+import logging
+import os
+import subprocess
+import sys
+from datetime import datetime
+
+# ---------------------------------------------------------------------------
+# Ansible-rendered configuration
+# ---------------------------------------------------------------------------
+FREEIPA_LDAP_URL  = "{{ _freepbx_ipa_ldap_url }}"
+FREEIPA_BIND_DN   = "{{ _freepbx_ipa_bind_dn }}"
+FREEIPA_BIND_PW   = "{{ _freepbx_ipa_bind_pw }}"
+FREEIPA_BASE_DN   = "{{ _freepbx_ipa_base_dn }}"
+EXTEN_ATTR        = "{{ _freepbx_ipa_exten_attr }}"
+VERIFY_TLS        = {{ freepbx_tls_verify | default(false) | lower | capitalize }}
+
+OUTPUT_CONF       = "/etc/asterisk/freeipa_endpoints_dynamic.conf"
+ASTERISK_CMD      = "/usr/sbin/asterisk"
+
+# ---------------------------------------------------------------------------
+# Logging
+# ---------------------------------------------------------------------------
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [freeipa-sync] %(levelname)s %(message)s",
+    datefmt="%Y-%m-%dT%H:%M:%S",
+)
+log = logging.getLogger("freeipa-sync")
+
+
+# ---------------------------------------------------------------------------
+# LDAP helpers
+# ---------------------------------------------------------------------------
+def ldap_connect():
+    """Return an authenticated ldap3 Connection or None if unavailable."""
+    try:
+        from ldap3 import Server, Connection, ALL, SAFE_SYNC, Tls
+        import ssl
+
+        tls_config = None
+        if FREEIPA_LDAP_URL.startswith("ldaps://"):
+            tls_ctx = ssl.create_default_context()
+            if not VERIFY_TLS:
+                tls_ctx.check_hostname = False
+                tls_ctx.verify_mode = ssl.CERT_NONE
+            tls_config = Tls(validate=ssl.CERT_NONE if not VERIFY_TLS else ssl.CERT_REQUIRED)
+
+        server = Server(
+            FREEIPA_LDAP_URL,
+            tls=tls_config,
+            get_info=ALL,
+            connect_timeout=10,
+        )
+        conn = Connection(
+            server,
+            user=FREEIPA_BIND_DN,
+            password=FREEIPA_BIND_PW,
+            auto_bind=True,
+            client_strategy=SAFE_SYNC,
+            raise_exceptions=False,
+        )
+        if not conn.bound:
+            log.error("LDAP bind failed: %s", conn.result)
+            return None
+        log.info("LDAP bind OK: %s", FREEIPA_LDAP_URL)
+        return conn
+    except ImportError:
+        log.warning("ldap3 not installed — falling back to ldapsearch CLI")
+        return None
+    except Exception as exc:  # noqa: BLE001
+        log.error("LDAP connect error: %s", exc)
+        return None
+
+
+def ldap_search_users_cli():
+    """Fallback: use ldapsearch CLI to find users with telephoneNumber."""
+    try:
+        result = subprocess.run(
+            [
+                "ldapsearch", "-x",
+                "-H", FREEIPA_LDAP_URL,
+                "-D", FREEIPA_BIND_DN,
+                "-w", FREEIPA_BIND_PW,
+                "-b", FREEIPA_BASE_DN,
+                f"({EXTEN_ATTR}=*)",
+                "uid", "cn", "mail", EXTEN_ATTR,
+                "-LLL",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=20,
+        )
+        if result.returncode != 0:
+            log.error("ldapsearch error: %s", result.stderr.strip())
+            return []
+        return _parse_ldif(result.stdout)
+    except FileNotFoundError:
+        log.error("ldapsearch CLI not found and ldap3 not installed — cannot sync")
+        return []
+    except Exception as exc:  # noqa: BLE001
+        log.error("ldapsearch exception: %s", exc)
+        return []
+
+
+def _parse_ldif(ldif_text):
+    """Parse LDIF output into list of {uid, cn, mail, exten} dicts."""
+    users = []
+    current: dict = {}
+    for line in ldif_text.splitlines():
+        if not line.strip():
+            if current.get("uid") and current.get(EXTEN_ATTR):
+                users.append(current)
+            current = {}
+            continue
+        if ":" in line:
+            key, _, value = line.partition(":")
+            current[key.strip()] = value.strip()
+    if current.get("uid") and current.get(EXTEN_ATTR):
+        users.append(current)
+    return users
+
+
+def fetch_users(conn):
+    """Return list of user dicts from ldap3 connection or CLI fallback."""
+    if conn is None:
+        return ldap_search_users_cli()
+    try:
+        conn.search(
+            search_base=FREEIPA_BASE_DN,
+            search_filter=f"(&(objectClass=inetOrgPerson)({EXTEN_ATTR}=*))",
+            attributes=["uid", "cn", "mail", EXTEN_ATTR],
+        )
+        users = []
+        for entry in conn.entries:
+            uid   = str(entry["uid"].value)   if "uid"      in entry else ""
+            cn    = str(entry["cn"].value)    if "cn"       in entry else uid
+            mail  = str(entry["mail"].value)  if "mail"     in entry else f"{uid}@lab.local"
+            exten = str(entry[EXTEN_ATTR].value) if EXTEN_ATTR in entry else ""
+            if uid and exten:
+                users.append({"uid": uid, "cn": cn, "mail": mail, EXTEN_ATTR: exten})
+        return users
+    except Exception as exc:  # noqa: BLE001
+        log.error("ldap3 search error: %s — falling back to CLI", exc)
+        return ldap_search_users_cli()
+
+
+# ---------------------------------------------------------------------------
+# Config generation
+# ---------------------------------------------------------------------------
+def _endpoint_password(uid, exten):
+    """Deterministic password for lab endpoints (not for production use)."""
+    seed = f"freepbx-ipa-{uid}-{exten}-int11"
+    return "Ipa" + hashlib.sha256(seed.encode()).hexdigest()[:12]
+
+
+def build_pjsip_conf(users):
+    """Return Asterisk PJSIP config string for the given user list."""
+    now = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
+    lines = [
+        f"; =================================================================",
+        f"; Auto-generated by freeipa_sync.py -- INT-11",
+        f"; Source: {FREEIPA_LDAP_URL}",
+        f"; Generated: {now}",
+        f"; Users: {len(users)}",
+        f"; =================================================================",
+        "",
+    ]
+    for u in users:
+        uid   = u["uid"]
+        cn    = u.get("cn", uid)
+        exten = u.get(EXTEN_ATTR, "")
+        pw    = _endpoint_password(uid, exten)
+        lines += [
+            f"; ── {cn} (uid={uid}, exten={exten}) ──",
+            f"[{exten}](freeipa-endpoint-template)",
+            f"callerid={cn} <{exten}>",
+            f"auth={exten}",
+            f"aors={exten}",
+            "",
+            f"[{exten}](freeipa-auth-template)",
+            f"username={exten}",
+            f"password={pw}",
+            "",
+            f"[{exten}](freeipa-aor-template)",
+            "",
+        ]
+    return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# Reload Asterisk
+# ---------------------------------------------------------------------------
+def asterisk_pjsip_reload(dry_run):
+    if dry_run:
+        log.info("[dry-run] Would run: asterisk -rx 'pjsip reload'")
+        return
+    try:
+        result = subprocess.run(
+            [ASTERISK_CMD, "-rx", "pjsip reload"],
+            capture_output=True, text=True, timeout=15,
+        )
+        if result.returncode == 0:
+            log.info("PJSIP reload OK: %s", result.stdout.strip())
+        else:
+            log.warning("PJSIP reload non-zero rc=%d: %s", result.returncode, result.stderr.strip())
+    except FileNotFoundError:
+        log.warning("asterisk binary not found — skipping pjsip reload")
+    except Exception as exc:  # noqa: BLE001
+        log.warning("PJSIP reload error: %s", exc)
+
+
+# ---------------------------------------------------------------------------
+# Main
+# ---------------------------------------------------------------------------
+def main():
+    ap = argparse.ArgumentParser(description="FreePBX ↔ FreeIPA extension sync (INT-11)")
+    ap.add_argument("--dry-run", action="store_true", help="Print config without writing or reloading")
+    ap.add_argument("--verbose", action="store_true")
+    args = ap.parse_args()
+
+    if args.verbose:
+        logging.getLogger().setLevel(logging.DEBUG)
+
+    log.info("Starting FreeIPA extension sync — source: %s", FREEIPA_LDAP_URL)
+
+    conn   = ldap_connect()
+    users  = fetch_users(conn)
+    if conn:
+        try:
+            conn.unbind()
+        except Exception:  # noqa: BLE001
+            pass
+
+    log.info("Found %d users with %s in base DN: %s", len(users), EXTEN_ATTR, FREEIPA_BASE_DN)
+    if args.verbose:
+        for u in users:
+            log.debug("  uid=%-12s cn=%-20s exten=%s", u["uid"], u.get("cn", ""), u.get(EXTEN_ATTR, ""))
+
+    pjsip_conf = build_pjsip_conf(users)
+
+    if args.dry_run:
+        print(pjsip_conf)
+        log.info("[dry-run] No files written.")
+        return
+
+    # Check if content changed before writing
+    existing_hash = ""
+    if os.path.exists(OUTPUT_CONF):
+        with open(OUTPUT_CONF, "r", encoding="utf-8") as fh:
+            existing_hash = hashlib.md5(fh.read().encode()).hexdigest()
+    new_hash = hashlib.md5(pjsip_conf.encode()).hexdigest()
+
+    if existing_hash == new_hash:
+        log.info("No changes detected — skipping write and reload")
+        sys.exit(0)
+
+    with open(OUTPUT_CONF, "w", encoding="utf-8") as fh:
+        fh.write(pjsip_conf)
+    log.info("Written %d bytes to %s", len(pjsip_conf), OUTPUT_CONF)
+
+    asterisk_pjsip_reload(dry_run=False)
+    log.info("INT-11 FreeIPA sync complete: %d endpoints provisioned", len(users))
+
+
+if __name__ == "__main__":
+    main()
