@@ -13,3 +13,8 @@
   ansible.builtin.import_tasks: keycloak-saml.yml
   tags: [suitecrm, integration, keycloak-saml]
   when: suitecrm_enable_keycloak_saml | default(true) | bool
+
+- name: "INT-09: Import FreePBX CTI integration tasks"
+  ansible.builtin.import_tasks: freepbx-cti.yml
+  tags: [suitecrm, integration, freepbx-cti]
+  when: suitecrm_enable_freepbx_cti | default(true) | bool

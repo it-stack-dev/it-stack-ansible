@@ -8,3 +8,8 @@
 - name: "Import freepbx configuration tasks"
   ansible.builtin.import_tasks: configure.yml
   tags: [freepbx, configure]
+
+- name: "INT-09: Import SuiteCRM CTI integration tasks"
+  ansible.builtin.import_tasks: suitecrm-cti.yml
+  tags: [freepbx, integration, suitecrm-cti]
+  when: freepbx_enable_suitecrm_cti | default(true) | bool

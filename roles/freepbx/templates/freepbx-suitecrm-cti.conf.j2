@@ -1,0 +1,40 @@
+; freepbx-suitecrm-cti.conf.j2
+; IT-Stack: FreePBX ↔ SuiteCRM CTI integration — Ansible managed (INT-09)
+; Loaded by Asterisk as a custom macro/context extension.
+; Source: roles/freepbx/templates/freepbx-suitecrm-cti.conf.j2
+
+; =============================================================================
+; SuiteCRM CTI integration settings
+; Calls this context for every outbound/inbound call to log to SuiteCRM.
+; =============================================================================
+
+[suitecrm-cti-globals]
+; SuiteCRM REST endpoint (configured by Ansible)
+SUITECRM_URL={{ _freepbx_cti_suitecrm_url }}
+SUITECRM_API_KEY={{ _freepbx_cti_api_key }}
+SUITECRM_CALLS_ENDPOINT={{ _freepbx_cti_calls_endpoint }}
+SUITECRM_CONTACTS_ENDPOINT={{ _freepbx_cti_contacts_endpoint }}
+
+[macro-suitecrm-log-call]
+; Macro: log a completed call to SuiteCRM Calls module via AGI
+; Usage: Macro(suitecrm-log-call,${CALLERID(num)},${EXTEN},${CDR(duration)})
+exten => s,1,NoOp(SuiteCRM CTI: logging call ${ARG1} -> ${ARG2} duration=${ARG3}s)
+ same => n,AGI(suitecrm_log.py,${ARG1},${ARG2},${ARG3},${SUITECRM_URL},${SUITECRM_API_KEY})
+ same => n,Return()
+
+[macro-suitecrm-contact-popup]
+; Macro: look up caller in SuiteCRM Contacts on inbound call
+; Usage: Macro(suitecrm-contact-popup,${CALLERID(num)})
+exten => s,1,NoOp(SuiteCRM CTI: contact lookup for ${ARG1})
+ same => n,AGI(suitecrm_log.py,lookup,${ARG1},${SUITECRM_URL},${SUITECRM_API_KEY})
+ same => n,Return()
+
+[suitecrm-cti-outbound]
+; Context for click-to-call originate from SuiteCRM
+; SuiteCRM calls FreePBX AMI: originate channel=SIP/pbxuser exten=TARGET@default
+exten => _X.,1,NoOp(SuiteCRM click-to-call: ${CALLERID(num)} -> ${EXTEN})
+ same => n,Set(CHANNEL(musicclass)=default)
+ same => n,Macro(suitecrm-log-call,${CALLERID(num)},${EXTEN},0)
+ same => n,Dial(SIP/${EXTEN}@pstn-trunk,30,tTr)
+ same => n,Macro(suitecrm-log-call,${CALLERID(num)},${EXTEN},${CDR(billsec)})
+ same => n,Hangup()

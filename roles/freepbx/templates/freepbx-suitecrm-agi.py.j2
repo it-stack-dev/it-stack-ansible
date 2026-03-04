@@ -1,0 +1,93 @@
+#!/usr/bin/env python3
+# freepbx-suitecrm-agi.py.j2
+# IT-Stack: FreePBX ↔ SuiteCRM CTI — AGI call-log script
+# Ansible managed (INT-09). Deployed to: {{ _freepbx_cti_agi_path }}
+#
+# Usage (from Asterisk dialplan):
+#   AGI(suitecrm_log.py,<caller>,<callee>,<duration>,<suitecrm_url>,<api_key>)
+#   AGI(suitecrm_log.py,lookup,<phone_number>,<suitecrm_url>,<api_key>)
+
+import sys
+import os
+import urllib.request
+import urllib.parse
+import json
+
+def read_agi_env():
+    env = {}
+    while True:
+        line = sys.stdin.readline().strip()
+        if not line:
+            break
+        if ':' in line:
+            k, v = line.split(':', 1)
+            env[k.strip()] = v.strip()
+    return env
+
+def agi_send(msg):
+    sys.stdout.write(msg + '\n')
+    sys.stdout.flush()
+
+def post_call_log(caller, callee, duration, suitecrm_url, api_key):
+    """POST a completed call to SuiteCRM Calls module."""
+    payload = urllib.parse.urlencode({
+        'module':    'Calls',
+        'action':    'Save',
+        'name':      f'Call {caller} to {callee}',
+        'direction': 'Outbound' if caller else 'Inbound',
+        'status':    'Held',
+        'duration_hours': str(int(duration) // 3600),
+        'duration_minutes': str((int(duration) % 3600) // 60),
+        'description': f'Asterisk auto-logged call: {caller} -> {callee} ({duration}s)',
+        'api_key': api_key,
+    }).encode()
+    endpoint = f'{suitecrm_url}/index.php?module=Calls&action=Save'
+    try:
+        req = urllib.request.Request(endpoint, data=payload,
+                                     headers={'Content-Type': 'application/x-www-form-urlencoded'})
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            return resp.status
+    except Exception as exc:  # noqa: BLE001
+        sys.stderr.write(f'SUITECRM_CTI_ERROR: {exc}\n')
+        return 0
+
+def lookup_contact(phone, suitecrm_url, api_key):
+    """GET contact info for inbound caller popup."""
+    params = urllib.parse.urlencode({
+        'module': 'Contacts',
+        'action': 'index',
+        'searchFormTab': 'basic_search',
+        'query': 'true',
+        'phone': phone,
+        'api_key': api_key,
+    })
+    endpoint = f'{suitecrm_url}/index.php?{params}'
+    try:
+        req = urllib.request.Request(endpoint)
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            return resp.status
+    except Exception as exc:  # noqa: BLE001
+        sys.stderr.write(f'SUITECRM_CTI_LOOKUP_ERROR: {exc}\n')
+        return 0
+
+def main():
+    _env = read_agi_env()
+    args = sys.argv[1:]
+
+    if not args:
+        agi_send('200 result=0')
+        return
+
+    if args[0] == 'lookup' and len(args) >= 4:
+        _, phone, url, key = args[0], args[1], args[2], args[3]
+        status = lookup_contact(phone, url, key)
+    elif len(args) >= 5:
+        caller, callee, duration, url, key = args[0], args[1], args[2], args[3], args[4]
+        status = post_call_log(caller, callee, duration, url, key)
+    else:
+        status = 0
+
+    agi_send(f'200 result={1 if status in (200, 201, 302) else 0}')
+
+if __name__ == '__main__':
+    main()

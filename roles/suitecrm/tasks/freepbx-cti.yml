@@ -1,0 +1,96 @@
+---
+# roles/suitecrm/tasks/freepbx-cti.yml
+# INT-09: SuiteCRM ↔ FreePBX CTI integration (SuiteCRM side)
+# Configures SuiteCRM Asterisk integration:
+#   - AMI connection settings (FreePBX Manager Interface)
+#   - Click-to-call originate via AMI
+#   - Inbound call popup: contact lookup by phone number
+# Tags: [suitecrm, integration, freepbx-cti]
+
+- name: "INT-09 Step 1: Assert FreePBX web admin reachable"
+  ansible.builtin.uri:
+    url: "{{ suitecrm_freepbx_url }}/admin/config.php"
+    method: GET
+    status_code: [200, 302, 403, 401]
+    validate_certs: "{{ suitecrm_tls_verify | default(false) }}"
+    timeout: 15
+  register: _suitecrm_freepbx_check
+  retries: 4
+  delay: 15
+  until: _suitecrm_freepbx_check.status in [200, 302, 403, 401]
+  tags: [suitecrm, integration, freepbx-cti]
+
+- name: "INT-09 Step 2: Assert FreePBX REST API reachable"
+  ansible.builtin.uri:
+    url: "{{ suitecrm_freepbx_url }}/api/rest.php"
+    method: GET
+    status_code: [200, 302, 403, 401, 404]
+    validate_certs: "{{ suitecrm_tls_verify | default(false) }}"
+    timeout: 15
+  register: _suitecrm_freepbx_api_check
+  retries: 4
+  delay: 10
+  until: _suitecrm_freepbx_api_check.status in [200, 302, 403, 401, 404]
+  tags: [suitecrm, integration, freepbx-cti]
+
+- name: "INT-09 Step 3: Set FreePBX CTI facts"
+  ansible.builtin.set_fact:
+    _suitecrm_freepbx_url: "{{ suitecrm_freepbx_url }}"
+    _suitecrm_freepbx_ami_host: "{{ suitecrm_freepbx_ami_host }}"
+    _suitecrm_freepbx_ami_port: "{{ suitecrm_freepbx_ami_port | default('5038') }}"
+    _suitecrm_freepbx_ami_user: "{{ suitecrm_freepbx_ami_user | default('admin') }}"
+    _suitecrm_freepbx_ami_pass: "{{ vault_suitecrm_freepbx_ami_pass }}"
+    _suitecrm_freepbx_cti_php_path: >-
+      {{ suitecrm_install_dir }}/custom/Extension/application/Ext/Language/freepbx_cti.php
+  tags: [suitecrm, integration, freepbx-cti]
+
+- name: "INT-09 Step 4: Ensure SuiteCRM custom extension directory exists"
+  ansible.builtin.file:
+    path: "{{ suitecrm_install_dir }}/custom/Extension/application/Ext/Language"
+    state: directory
+    owner: "{{ suitecrm_user }}"
+    group: "{{ suitecrm_group }}"
+    mode: "0755"
+  tags: [suitecrm, integration, freepbx-cti]
+
+- name: "INT-09 Step 5: Deploy SuiteCRM FreePBX CTI config (config_override snippet)"
+  ansible.builtin.template:
+    src: suitecrm-freepbx-cti.php.j2
+    dest: "{{ _suitecrm_freepbx_cti_php_path }}"
+    owner: "{{ suitecrm_user }}"
+    group: "{{ suitecrm_group }}"
+    mode: "0644"
+  notify: repair suitecrm extensions
+  tags: [suitecrm, integration, freepbx-cti]
+
+- name: "INT-09 Step 6: Deploy SuiteCRM config_override.php AMI settings (blockinfile)"
+  ansible.builtin.blockinfile:
+    path: "{{ suitecrm_install_dir }}/config_override.php"
+    marker: "// {mark} ANSIBLE MANAGED — FreePBX CTI / INT-09"
+    create: true
+    owner: "{{ suitecrm_user }}"
+    group: "{{ suitecrm_group }}"
+    mode: "0644"
+    block: |
+      // FreePBX AMI / CTI integration — managed by Ansible (INT-09)
+      $sugar_config['asterisk_default_user'] = '{{ _suitecrm_freepbx_ami_user }}';
+      $sugar_config['asterisk_manager_host'] = '{{ _suitecrm_freepbx_ami_host }}';
+      $sugar_config['asterisk_manager_port'] = '{{ _suitecrm_freepbx_ami_port }}';
+      $sugar_config['asterisk_manager_username'] = '{{ _suitecrm_freepbx_ami_user }}';
+      $sugar_config['asterisk_manager_password'] = '{{ _suitecrm_freepbx_ami_pass }}';
+      $sugar_config['enable_call_logging'] = true;
+      $sugar_config['asterisk_crm_url'] = '{{ suitecrm_public_url }}';
+  notify: repair suitecrm extensions
+  tags: [suitecrm, integration, freepbx-cti]
+
+- name: "INT-09 Step 7: Flush handlers (repair SuiteCRM extensions)"
+  ansible.builtin.meta: flush_handlers
+  tags: [suitecrm, integration, freepbx-cti]
+
+- name: "INT-09 Step 8: Final assert — config_override.php contains AMI settings"
+  ansible.builtin.command:
+    cmd: "grep -c 'asterisk_manager_host' {{ suitecrm_install_dir }}/config_override.php"
+  register: _suitecrm_ami_check
+  changed_when: false
+  failed_when: _suitecrm_ami_check.rc != 0 or (_suitecrm_ami_check.stdout | int) < 1
+  tags: [suitecrm, integration, freepbx-cti]

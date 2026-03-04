@@ -1,0 +1,89 @@
+---
+# roles/freepbx/tasks/suitecrm-cti.yml
+# INT-09: FreePBX ↔ SuiteCRM CTI integration
+# Configures FreePBX to log call events to SuiteCRM via REST API:
+#   - click-to-call originate via SuiteCRM CTI interface
+#   - post-call log to SuiteCRM Calls module (activity logging)
+#   - contact popup lookup on inbound calls
+# Tags: [freepbx, integration, suitecrm-cti]
+
+- name: "INT-09 Step 1: Assert SuiteCRM CTI calls/save endpoint reachable"
+  ansible.builtin.uri:
+    url: "{{ freepbx_suitecrm_url }}/index.php?module=Calls&action=Save"
+    method: POST
+    body_format: json
+    body:
+      name: "connectivity-check"
+      direction: "Outbound"
+    status_code: [200, 302, 403, 422]
+    validate_certs: "{{ freepbx_tls_verify | default(false) }}"
+    timeout: 15
+  register: _freepbx_suitecrm_calls_check
+  retries: 4
+  delay: 15
+  until: _freepbx_suitecrm_calls_check.status in [200, 302, 403, 422]
+  tags: [freepbx, integration, suitecrm-cti]
+
+- name: "INT-09 Step 2: Assert SuiteCRM contacts lookup endpoint reachable"
+  ansible.builtin.uri:
+    url: "{{ freepbx_suitecrm_url }}/index.php?module=Contacts&action=index"
+    method: GET
+    status_code: [200, 302, 403]
+    validate_certs: "{{ freepbx_tls_verify | default(false) }}"
+    timeout: 15
+  register: _freepbx_suitecrm_contacts_check
+  retries: 4
+  delay: 10
+  until: _freepbx_suitecrm_contacts_check.status in [200, 302, 403]
+  tags: [freepbx, integration, suitecrm-cti]
+
+- name: "INT-09 Step 3: Set CTI integration facts"
+  ansible.builtin.set_fact:
+    _freepbx_cti_suitecrm_url: "{{ freepbx_suitecrm_url }}"
+    _freepbx_cti_calls_endpoint: >-
+      {{ freepbx_suitecrm_url }}/index.php?module=Calls&action=Save
+    _freepbx_cti_contacts_endpoint: >-
+      {{ freepbx_suitecrm_url }}/index.php?module=Contacts&action=index
+    _freepbx_cti_api_key: "{{ freepbx_suitecrm_api_key }}"
+    _freepbx_cti_conf_path: "{{ freepbx_asterisk_confdir | default('/etc/asterisk') }}/suitecrm_cti.conf"
+    _freepbx_cti_agi_path: "{{ freepbx_agi_bin_dir | default('/var/lib/asterisk/agi-bin') }}/suitecrm_log.py"
+  tags: [freepbx, integration, suitecrm-cti]
+
+- name: "INT-09 Step 4: Deploy FreePBX SuiteCRM CTI Asterisk config"
+  ansible.builtin.template:
+    src: freepbx-suitecrm-cti.conf.j2
+    dest: "{{ _freepbx_cti_conf_path }}"
+    owner: asterisk
+    group: asterisk
+    mode: "0640"
+  notify: reload asterisk dialplan
+  tags: [freepbx, integration, suitecrm-cti]
+
+- name: "INT-09 Step 5: Deploy SuiteCRM call-log AGI Python script"
+  ansible.builtin.template:
+    src: freepbx-suitecrm-agi.py.j2
+    dest: "{{ _freepbx_cti_agi_path }}"
+    owner: asterisk
+    group: asterisk
+    mode: "0750"
+  notify: reload asterisk dialplan
+  tags: [freepbx, integration, suitecrm-cti]
+
+- name: "INT-09 Step 6: Ensure AGI script is executable"
+  ansible.builtin.file:
+    path: "{{ _freepbx_cti_agi_path }}"
+    mode: "0750"
+    owner: asterisk
+    group: asterisk
+  tags: [freepbx, integration, suitecrm-cti]
+
+- name: "INT-09 Step 7: Flush handlers (reload Asterisk dial plan)"
+  ansible.builtin.meta: flush_handlers
+  tags: [freepbx, integration, suitecrm-cti]
+
+- name: "INT-09 Step 8: Final assert — CTI config file present"
+  ansible.builtin.stat:
+    path: "{{ _freepbx_cti_conf_path }}"
+  register: _freepbx_cti_conf_stat
+  failed_when: not _freepbx_cti_conf_stat.stat.exists
+  tags: [freepbx, integration, suitecrm-cti]
