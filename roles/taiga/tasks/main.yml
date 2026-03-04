@@ -8,3 +8,8 @@
 - name: "Import taiga configuration tasks"
   ansible.builtin.import_tasks: configure.yml
   tags: [taiga, configure]
+
+- name: "INT-08: Import Keycloak OIDC integration tasks"
+  ansible.builtin.import_tasks: keycloak-oidc.yml
+  tags: [taiga, integration, keycloak-oidc]
+  when: taiga_enable_keycloak_oidc | default(true) | bool

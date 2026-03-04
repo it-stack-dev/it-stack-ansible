@@ -1,0 +1,41 @@
+# taiga-oidc-settings.py.j2 — INT-08 Taiga OIDC Django settings
+# Managed by Ansible (it-stack-ansible roles/taiga/tasks/keycloak-oidc.yml)
+# DO NOT EDIT MANUALLY — changes will be overwritten on next Ansible run.
+#
+# Configures taiga-contrib-oidc-auth to use Keycloak as OIDC Identity Provider.
+# Import this from settings/local.py:  from .oidc import *
+
+from django.conf import settings
+
+# ── mozilla-django-oidc / taiga-contrib-oidc-auth ──────────────────────────
+
+INSTALLED_APPS = getattr(settings, 'INSTALLED_APPS', [])
+
+# OpenID Connect Relying Party (Taiga as client)
+OIDC_RP_CLIENT_ID     = "{{ taiga_oidc_client_id | default('taiga') }}"
+OIDC_RP_CLIENT_SECRET = "{{ vault_taiga_oidc_client_secret }}"
+OIDC_RP_SIGN_ALGO     = "RS256"
+OIDC_RP_SCOPES        = "openid profile email"
+
+# OpenID Connect Provider (Keycloak)
+OIDC_OP_ISSUER                 = "{{ _taiga_oidc_issuer }}"
+OIDC_OP_AUTHORIZATION_ENDPOINT = "{{ _taiga_oidc_auth_ep }}"
+OIDC_OP_TOKEN_ENDPOINT         = "{{ _taiga_oidc_token_ep }}"
+OIDC_OP_USER_ENDPOINT          = "{{ _taiga_oidc_userinfo_ep }}"
+OIDC_OP_JWKS_URI               = "{{ _taiga_oidc_jwks_uri }}"
+
+# TLS
+OIDC_VERIFY_SSL = {{ taiga_tls_verify | default(false) | bool | lower | capitalize }}
+
+# Claim mapping
+OIDC_USERNAME_ALGO     = "taiga_contrib_oidc_auth.oidc.generate_username"
+OIDC_STORE_ACCESS_TOKEN = True
+OIDC_STORE_ID_TOKEN    = True
+
+# User provisioning
+OIDC_CREATE_USER = True
+
+# Redirect after login/logout
+LOGIN_REDIRECT_URL       = "/"
+LOGOUT_REDIRECT_URL      = "{{ _taiga_oidc_issuer }}/protocol/openid-connect/logout"
+LOGIN_REDIRECT_URL_FAILURE = "/login"

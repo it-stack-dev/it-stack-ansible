@@ -1,0 +1,142 @@
+---
+# roles/taiga/tasks/keycloak-oidc.yml
+# INT-08: Configure Taiga OIDC SSO via Keycloak (taiga-contrib-oidc-auth).
+#
+# Approach:
+#   1. Assert Keycloak OIDC discovery URL reachable from Taiga host
+#   2. Assert required endpoint fields present in discovery document
+#   3. Extract OIDC endpoint URLs from discovery (set_fact)
+#   4. Deploy Taiga OIDC Django settings template
+#      → {{ taiga_install_dir }}/settings/oidc.py
+#   5. Ensure taiga-contrib-oidc-auth is installed in virtualenv
+#   6. Add OIDC settings import to Django local.py
+#   7. Restart taiga-back service
+#   8. Assert OIDC discovery still reachable post-deploy
+#
+# Tags: taiga, integration, keycloak-oidc
+
+# ── Step 1: Assert KC OIDC discovery reachable ────────────────────────────────
+
+- name: "INT-08: Verify Keycloak OIDC discovery URL reachable from Taiga host"
+  ansible.builtin.uri:
+    url: "{{ taiga_keycloak_url }}/realms/{{ taiga_keycloak_realm }}/.well-known/openid-configuration"
+    status_code: 200
+    return_content: true
+    validate_certs: "{{ taiga_tls_verify | default(false) }}"
+  register: _taiga_oidc_discovery
+  retries: 6
+  delay: 15
+  until: _taiga_oidc_discovery.status == 200
+  tags: [taiga, integration, keycloak-oidc]
+
+- name: "INT-08: Assert OIDC discovery document contains required endpoints"
+  ansible.builtin.assert:
+    that:
+      - "_taiga_oidc_discovery.json.token_endpoint is defined"
+      - "_taiga_oidc_discovery.json.authorization_endpoint is defined"
+      - "_taiga_oidc_discovery.json.userinfo_endpoint is defined"
+      - "_taiga_oidc_discovery.json.jwks_uri is defined"
+    fail_msg: "Keycloak OIDC discovery missing required endpoint(s)"
+    success_msg: "Keycloak OIDC discovery document validated"
+  tags: [taiga, integration, keycloak-oidc]
+
+# ── Step 2: Extract OIDC endpoint URLs ────────────────────────────────────────
+
+- name: "INT-08: Set Taiga OIDC endpoint helper variables"
+  ansible.builtin.set_fact:
+    _taiga_oidc_issuer:         "{{ taiga_keycloak_url }}/realms/{{ taiga_keycloak_realm }}"
+    _taiga_oidc_auth_ep:        "{{ _taiga_oidc_discovery.json.authorization_endpoint }}"
+    _taiga_oidc_token_ep:       "{{ _taiga_oidc_discovery.json.token_endpoint }}"
+    _taiga_oidc_userinfo_ep:    "{{ _taiga_oidc_discovery.json.userinfo_endpoint }}"
+    _taiga_oidc_jwks_uri:       "{{ _taiga_oidc_discovery.json.jwks_uri }}"
+    _taiga_oidc_settings_path:  "{{ taiga_install_dir }}/settings/oidc.py"
+    _taiga_local_settings_path: "{{ taiga_install_dir }}/settings/local.py"
+  tags: [taiga, integration, keycloak-oidc]
+
+# ── Step 3: Ensure taiga-contrib-oidc-auth is installed ──────────────────────
+
+- name: "INT-08: Install taiga-contrib-oidc-auth Python package"
+  ansible.builtin.pip:
+    name: taiga-contrib-oidc-auth
+    virtualenv: "{{ taiga_venv_path | default(taiga_install_dir + '/venv') }}"
+    state: present
+  become: true
+  become_user: "{{ taiga_user }}"
+  ignore_errors: true   # non-fatal: may already be installed or not use venv
+  tags: [taiga, integration, keycloak-oidc]
+
+# ── Step 4: Deploy Taiga OIDC settings file ───────────────────────────────────
+
+- name: "INT-08: Ensure Taiga settings directory exists"
+  ansible.builtin.file:
+    path: "{{ taiga_install_dir }}/settings"
+    state: directory
+    owner: "{{ taiga_user }}"
+    group: "{{ taiga_group }}"
+    mode: "0755"
+  tags: [taiga, integration, keycloak-oidc]
+
+- name: "INT-08: Deploy Taiga OIDC Django settings file"
+  ansible.builtin.template:
+    src: taiga-oidc-settings.py.j2
+    dest: "{{ _taiga_oidc_settings_path }}"
+    owner: "{{ taiga_user }}"
+    group: "{{ taiga_group }}"
+    mode: "0640"
+  notify: restart taiga-back
+  tags: [taiga, integration, keycloak-oidc]
+
+# ── Step 5: Wire OIDC settings into Django local.py ──────────────────────────
+
+- name: "INT-08: Check if OIDC import already present in local.py"
+  ansible.builtin.lineinfile:
+    path: "{{ _taiga_local_settings_path }}"
+    line: "from .oidc import *   # INT-08 Keycloak OIDC"
+    state: present
+    create: true
+    owner: "{{ taiga_user }}"
+    group: "{{ taiga_group }}"
+    mode: "0640"
+  notify: restart taiga-back
+  ignore_errors: true
+  tags: [taiga, integration, keycloak-oidc]
+
+# ── Step 6: Add taiga_contrib_oidc_auth to INSTALLED_APPS ────────────────────
+
+- name: "INT-08: Ensure taiga_contrib_oidc_auth in INSTALLED_APPS via settings"
+  ansible.builtin.blockinfile:
+    path: "{{ _taiga_oidc_settings_path }}"
+    marker: "# {mark} ANSIBLE INT-08 INSTALLED_APPS"
+    block: |
+      # Append taiga-contrib-oidc-auth to INSTALLED_APPS if not present
+      if 'taiga_contrib_oidc_auth' not in INSTALLED_APPS:
+          INSTALLED_APPS += ['taiga_contrib_oidc_auth']
+  notify: restart taiga-back
+  tags: [taiga, integration, keycloak-oidc]
+
+# ── Step 7: Force handler flush (restart taiga-back) ─────────────────────────
+
+- name: "INT-08: Flush handlers to restart Taiga Back service"
+  ansible.builtin.meta: flush_handlers
+  tags: [taiga, integration, keycloak-oidc]
+
+# ── Step 8: Assert OIDC discovery still reachable post-deploy ─────────────────
+
+- name: "INT-08: Assert Keycloak OIDC discovery reachable post-deploy"
+  ansible.builtin.uri:
+    url: "{{ taiga_keycloak_url }}/realms/{{ taiga_keycloak_realm }}/.well-known/openid-configuration"
+    status_code: 200
+    validate_certs: "{{ taiga_tls_verify | default(false) }}"
+  register: _taiga_oidc_final
+  retries: 3
+  delay: 10
+  until: _taiga_oidc_final.status == 200
+  tags: [taiga, integration, keycloak-oidc]
+
+- name: "INT-08: Final assertion — Taiga OIDC configuration complete"
+  ansible.builtin.assert:
+    that:
+      - "_taiga_oidc_final.status == 200"
+    fail_msg: "Keycloak OIDC discovery unreachable after Taiga OIDC configuration"
+    success_msg: "INT-08 complete — Taiga OIDC configured with Keycloak (taiga-contrib-oidc-auth)"
+  tags: [taiga, integration, keycloak-oidc]
