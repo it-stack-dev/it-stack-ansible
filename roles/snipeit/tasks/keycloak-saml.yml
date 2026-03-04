@@ -1,0 +1,116 @@
+---
+# roles/snipeit/tasks/keycloak-saml.yml
+# INT-08b: Snipe-IT ↔ Keycloak SAML 2.0 integration
+# Idempotent: fetches KC IdP descriptor, extracts signing cert,
+# deploys SAML settings to Snipe-IT .env, validates SP ACS URL reachable.
+# Tags: [snipeit, integration, keycloak-saml]
+
+- name: "INT-08b Step 1: Assert Keycloak SAML IdP metadata reachable"
+  ansible.builtin.uri:
+    url: "{{ snipeit_keycloak_url }}/realms/{{ snipeit_keycloak_realm }}/protocol/saml/descriptor"
+    method: GET
+    status_code: 200
+    return_content: true
+    validate_certs: "{{ snipeit_tls_verify | default(false) }}"
+    timeout: 30
+  register: _snipeit_saml_meta
+  retries: 6
+  delay: 15
+  until: _snipeit_saml_meta.status == 200
+  tags: [snipeit, integration, keycloak-saml]
+
+- name: "INT-08b Step 2: Assert IdP metadata contains EntityDescriptor + signing certificate"
+  ansible.builtin.assert:
+    that:
+      - "'EntityDescriptor' in _snipeit_saml_meta.content or 'entityID' in _snipeit_saml_meta.content"
+      - "'X509Certificate' in _snipeit_saml_meta.content"
+    fail_msg: >-
+      Keycloak SAML IdP metadata at
+      {{ snipeit_keycloak_url }}/realms/{{ snipeit_keycloak_realm }}/protocol/saml/descriptor
+      is missing EntityDescriptor or X509Certificate.
+      Ensure the realm has a signing key configured.
+    success_msg: "Keycloak SAML IdP metadata validated (EntityDescriptor + X509Certificate present)"
+  tags: [snipeit, integration, keycloak-saml]
+
+- name: "INT-08b Step 3: Extract SAML signing certificate from IdP metadata"
+  ansible.builtin.set_fact:
+    _snipeit_saml_idp_entityid: >-
+      {{ snipeit_keycloak_url }}/realms/{{ snipeit_keycloak_realm }}
+    _snipeit_saml_idp_sso_url: >-
+      {{ snipeit_keycloak_url }}/realms/{{ snipeit_keycloak_realm }}/protocol/saml
+    _snipeit_saml_idp_slo_url: >-
+      {{ snipeit_keycloak_url }}/realms/{{ snipeit_keycloak_realm }}/protocol/saml
+    _snipeit_saml_metadata_url: >-
+      {{ snipeit_keycloak_url }}/realms/{{ snipeit_keycloak_realm }}/protocol/saml/descriptor
+    _snipeit_saml_sp_entity_id: >-
+      {{ snipeit_app_url }}/saml2/{{ snipeit_keycloak_realm }}/metadata
+    _snipeit_saml_sp_acs_url: >-
+      {{ snipeit_app_url }}/saml2/{{ snipeit_keycloak_realm }}/acs
+    _snipeit_saml_sp_slo_url: >-
+      {{ snipeit_app_url }}/saml2/{{ snipeit_keycloak_realm }}/sls
+    _snipeit_saml_x509: >-
+      {{ _snipeit_saml_meta.content
+         | regex_search('<ds:X509Certificate[^>]*>([^<]+)</ds:X509Certificate>', '\1')
+         | first | default('') | trim }}
+  tags: [snipeit, integration, keycloak-saml]
+
+- name: "INT-08b Step 4: Deploy Snipe-IT SAML .env overrides (snipeit-saml-settings.env.j2)"
+  ansible.builtin.template:
+    src: snipeit-saml-settings.env.j2
+    dest: "{{ snipeit_install_dir }}/.env.saml"
+    owner: "{{ snipeit_user }}"
+    group: "{{ snipeit_group }}"
+    mode: "0600"
+  notify: restart php8.3-fpm
+  tags: [snipeit, integration, keycloak-saml]
+
+- name: "INT-08b Step 5: Merge SAML env overrides into main .env (idempotent include)"
+  ansible.builtin.blockinfile:
+    path: "{{ snipeit_install_dir }}/.env"
+    marker: "# {mark} ANSIBLE MANAGED — SAML2 / INT-08b"
+    block: |
+      # Keycloak SAML2 integration — managed by Ansible (INT-08b)
+      SAML2_ENABLED=true
+      SAML2_IDP_METADATA_URL={{ _snipeit_saml_metadata_url }}
+      SAML2_SP_ENTITY_ID={{ _snipeit_saml_sp_entity_id }}
+      SAML2_SP_ACS_URL={{ _snipeit_saml_sp_acs_url }}
+      SAML2_AUTOLOAD_METADATA=true
+      SAML2_IDP_ENTITYID={{ _snipeit_saml_idp_entityid }}
+      SAML2_IDP_SSO_URL={{ _snipeit_saml_idp_sso_url }}
+      SAML2_IDP_SLO_URL={{ _snipeit_saml_idp_slo_url }}
+      SAML2_IDP_x509={{ _snipeit_saml_x509 }}
+    create: true
+    owner: "{{ snipeit_user }}"
+    group: "{{ snipeit_group }}"
+    mode: "0600"
+  notify: restart php8.3-fpm
+  tags: [snipeit, integration, keycloak-saml]
+
+- name: "INT-08b Step 6: Run Snipe-IT artisan saml:install (register SAML provider)"
+  ansible.builtin.command:
+    cmd: "php artisan saml2:create-tenant --key=snipeit"
+    chdir: "{{ snipeit_install_dir }}"
+  become: true
+  become_user: "{{ snipeit_user }}"
+  register: _snipeit_saml_artisan
+  changed_when: "'Created' in _snipeit_saml_artisan.stdout"
+  failed_when: false
+  notify: restart php8.3-fpm
+  tags: [snipeit, integration, keycloak-saml]
+
+- name: "INT-08b Step 7: Flush handlers (restart php-fpm / nginx)"
+  ansible.builtin.meta: flush_handlers
+  tags: [snipeit, integration, keycloak-saml]
+
+- name: "INT-08b Step 8: Final assert — KC SAML IdP metadata still reachable post-deploy"
+  ansible.builtin.uri:
+    url: "{{ snipeit_keycloak_url }}/realms/{{ snipeit_keycloak_realm }}/protocol/saml/descriptor"
+    method: GET
+    status_code: 200
+    validate_certs: "{{ snipeit_tls_verify | default(false) }}"
+    timeout: 15
+  retries: 3
+  delay: 10
+  until: _snipeit_saml_final.status == 200
+  register: _snipeit_saml_final
+  tags: [snipeit, integration, keycloak-saml]

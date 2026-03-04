@@ -8,3 +8,8 @@
 - name: "Import snipeit configuration tasks"
   ansible.builtin.import_tasks: configure.yml
   tags: [snipeit, configure]
+
+- name: "INT-08b: Import Keycloak SAML 2.0 integration tasks"
+  ansible.builtin.import_tasks: keycloak-saml.yml
+  tags: [snipeit, integration, keycloak-saml]
+  when: snipeit_enable_keycloak_saml | default(true) | bool
