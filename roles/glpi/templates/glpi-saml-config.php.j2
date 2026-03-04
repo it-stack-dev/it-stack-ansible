@@ -1,0 +1,75 @@
+<?php
+/**
+ * glpi-saml-config.php.j2 — INT-07 GLPI SAML 2.0 SSO Configuration
+ * Managed by Ansible (it-stack-ansible roles/glpi/tasks/keycloak-saml.yml)
+ * DO NOT EDIT MANUALLY — changes will be overwritten on next Ansible run.
+ *
+ * Configures GLPI to use Keycloak as SAML 2.0 Identity Provider.
+ * Compatible with: php-saml (onelogin/php-saml), GLPI SAML plugin.
+ */
+
+// ── Service Provider (GLPI) ───────────────────────────────────────────────────
+$saml_settings = [
+  'sp' => [
+    'entityId'                 => '{{ _glpi_sp_entity_id }}',
+    'assertionConsumerService' => [
+      'url'     => '{{ _glpi_sp_acs_url }}',
+      'binding' => 'urn:oasis:names:tc:SAML:2.0:bindings:HTTP-POST',
+    ],
+    'singleLogoutService'      => [
+      'url'     => '{{ _glpi_sp_slo_url }}',
+      'binding' => 'urn:oasis:names:tc:SAML:2.0:bindings:HTTP-Redirect',
+    ],
+    'NameIDFormat'             => 'urn:oasis:names:tc:SAML:1.1:nameid-format:unspecified',
+    'x509cert'                 => '',
+    'privateKey'               => '',
+  ],
+
+  // ── Identity Provider (Keycloak) ─────────────────────────────────────────
+  'idp' => [
+    'entityId'       => '{{ _glpi_idp_entity_id }}',
+    'singleSignOnService' => [
+      'url'     => '{{ _glpi_idp_sso_url }}',
+      'binding' => 'urn:oasis:names:tc:SAML:2.0:bindings:HTTP-Redirect',
+    ],
+    'singleLogoutService' => [
+      'url'     => '{{ _glpi_idp_slo_url }}',
+      'binding' => 'urn:oasis:names:tc:SAML:2.0:bindings:HTTP-Redirect',
+    ],
+    'x509cert' => '{{ _glpi_kc_idp_cert | default("") }}',
+  ],
+
+  // ── Security ──────────────────────────────────────────────────────────────
+  'security' => [
+    'nameIdEncrypted'         => false,
+    'authnRequestsSigned'     => false,
+    'logoutRequestSigned'     => false,
+    'logoutResponseSigned'    => false,
+    'signMetadata'            => false,
+    'wantMessagesSigned'      => false,
+    'wantAssertionsSigned'    => true,
+    'wantNameId'              => true,
+    'wantNameIdEncrypted'     => false,
+    'wantAssertionsEncrypted' => false,
+    'allowRepeatAttributeName'=> true,
+    'rejectUnsolicitedResponsesWithInResponseTo' => false,
+    'requestedAuthnContext'   => false,
+    'signatureAlgorithm'      => 'http://www.w3.org/2001/04/xmldsig-more#rsa-sha256',
+    'digestAlgorithm'         => 'http://www.w3.org/2001/04/xmlenc#sha256',
+  ],
+
+  // ── Attribute Mapping ─────────────────────────────────────────────────────
+  'attributes' => [
+    'uid'        => 'uid',
+    'email'      => 'mail',
+    'first_name' => 'givenName',
+    'last_name'  => 'sn',
+    'groups'     => 'groups',
+  ],
+
+  // ── Provisioning ─────────────────────────────────────────────────────────
+  'provisioning' => [
+    'auto_create_users' => true,
+    'default_profile'   => 'Normal',
+  ],
+];

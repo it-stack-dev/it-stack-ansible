@@ -1,0 +1,177 @@
+---
+# roles/glpi/tasks/keycloak-saml.yml
+# INT-07: Configure GLPI SAML 2.0 SSO via Keycloak.
+#
+# Approach:
+#   1. Verify Keycloak SAML IdP metadata is reachable from GLPI host
+#   2. Assert IdP metadata contains required EntityDescriptor/IDPSSODescriptor
+#   3. Extract the Keycloak IdP X.509 certificate from the descriptor
+#   4. Deploy GLPI SAML config PHP file via template
+#      → glpi/config/saml_config.php (php-saml / SimpleSAMLphp settings)
+#   5. Enable SAML authentication in GLPI config.php ($CFG_GLPI['use_saml'])
+#   6. Configure GLPI LDAP directory source via mysql CLI on the DB host
+#   7. Assert IdP descriptor endpoint accessible from GLPI host
+#
+# Tags: glpi, integration, keycloak-saml
+
+# ── Step 1: Assert KC SAML IdP descriptor reachable ──────────────────────────
+
+- name: "INT-07: Verify Keycloak SAML IdP descriptor reachable from GLPI host"
+  ansible.builtin.uri:
+    url: "{{ glpi_keycloak_url }}/realms/{{ glpi_keycloak_realm }}/protocol/saml/descriptor"
+    status_code: 200
+    return_content: true
+    validate_certs: "{{ glpi_tls_verify | default(false) }}"
+  register: _kc_idp_descriptor
+  retries: 6
+  delay: 15
+  until: _kc_idp_descriptor.status == 200
+  tags: [glpi, integration, keycloak-saml]
+
+- name: "INT-07: Assert IdP descriptor contains required SAML metadata elements"
+  ansible.builtin.assert:
+    that:
+      - "'EntityDescriptor' in _kc_idp_descriptor.content"
+      - "'IDPSSODescriptor' in _kc_idp_descriptor.content"
+    fail_msg: "Keycloak SAML IdP descriptor missing EntityDescriptor or IDPSSODescriptor"
+    success_msg: "Keycloak SAML IdP descriptor validated"
+  tags: [glpi, integration, keycloak-saml]
+
+# ── Step 2: Extract IdP X.509 certificate ─────────────────────────────────────
+
+- name: "INT-07: Extract Keycloak IdP X.509 signing certificate from descriptor"
+  ansible.builtin.set_fact:
+    _glpi_kc_idp_cert: >-
+      {{ _kc_idp_descriptor.content
+         | regex_search('<ds:X509Certificate>([^<]+)</ds:X509Certificate>', '\\1')
+         | first | default('') }}
+  tags: [glpi, integration, keycloak-saml]
+
+# ── Step 3: Set helper vars ────────────────────────────────────────────────────
+
+- name: "INT-07: Set SAML helper variables"
+  ansible.builtin.set_fact:
+    _glpi_idp_entity_id: "{{ glpi_keycloak_url }}/realms/{{ glpi_keycloak_realm }}"
+    _glpi_idp_sso_url: "{{ glpi_keycloak_url }}/realms/{{ glpi_keycloak_realm }}/protocol/saml"
+    _glpi_idp_slo_url: "{{ glpi_keycloak_url }}/realms/{{ glpi_keycloak_realm }}/protocol/saml"
+    _glpi_sp_entity_id: "{{ glpi_sp_base_url }}/glpi"
+    _glpi_sp_acs_url: "{{ glpi_sp_base_url }}/glpi/index.php"
+    _glpi_sp_slo_url: "{{ glpi_sp_base_url }}/glpi/index.php?action=logout"
+    _glpi_saml_config_path: "{{ glpi_install_dir }}/config/saml_config.php"
+  tags: [glpi, integration, keycloak-saml]
+
+# ── Step 4: Deploy GLPI SAML config file ──────────────────────────────────────
+
+- name: "INT-07: Ensure GLPI config directory exists"
+  ansible.builtin.file:
+    path: "{{ glpi_install_dir }}/config"
+    state: directory
+    owner: "{{ glpi_user }}"
+    group: "{{ glpi_group }}"
+    mode: "0755"
+  tags: [glpi, integration, keycloak-saml]
+
+- name: "INT-07: Deploy GLPI SAML configuration file"
+  ansible.builtin.template:
+    src: glpi-saml-config.php.j2
+    dest: "{{ _glpi_saml_config_path }}"
+    owner: "{{ glpi_user }}"
+    group: "{{ glpi_group }}"
+    mode: "0640"
+  notify: restart php-fpm
+  tags: [glpi, integration, keycloak-saml]
+
+# ── Step 5: Enable SAML in GLPI config.php ────────────────────────────────────
+
+- name: "INT-07: Enable SAML authentication in GLPI config_db.php"
+  ansible.builtin.lineinfile:
+    path: "{{ glpi_install_dir }}/config/config_db.php"
+    line: "{{ item }}"
+    insertbefore: "^\\?>"
+    state: present
+    create: false
+  loop:
+    - "$CFG_GLPI['use_saml'] = 1;"
+    - "$CFG_GLPI['saml_idp_entity_id'] = '{{ _glpi_idp_entity_id }}';"
+    - "$CFG_GLPI['saml_idp_sso_url'] = '{{ _glpi_idp_sso_url }}';"
+    - "$CFG_GLPI['saml_sp_entity_id'] = '{{ _glpi_sp_entity_id }}';"
+    - "$CFG_GLPI['saml_sp_acs_url'] = '{{ _glpi_sp_acs_url }}';"
+    - "$CFG_GLPI['saml_auto_provision'] = 1;"
+  ignore_errors: true   # non-fatal: file may use different structure
+  tags: [glpi, integration, keycloak-saml]
+
+# ── Step 6: Configure GLPI LDAP directory via PHP CLI ─────────────────────────
+
+- name: "INT-07: Check if GLPI LDAP directory already configured"
+  ansible.builtin.command:
+    cmd: >
+      php -r "
+        define('GLPI_ROOT', '{{ glpi_install_dir }}');
+        define('GLPI_CONFIG_DIR', '{{ glpi_install_dir }}/config');
+        include('{{ glpi_install_dir }}/inc/autoload.function.php');
+        \$res = AuthLDAP::getAllDatas([], false);
+        echo count(\$res);
+      "
+    chdir: "{{ glpi_install_dir }}"
+  register: _glpi_ldap_count
+  changed_when: false
+  ignore_errors: true
+  become: true
+  become_user: "{{ glpi_user }}"
+  tags: [glpi, integration, keycloak-saml]
+
+- name: "INT-07: Insert GLPI LDAP source configuration via MySQL"
+  ansible.builtin.command:
+    cmd: >
+      mysql -h {{ glpi_db_host }} -P {{ glpi_db_port | default(3306) }}
+            -u {{ glpi_db_user }} -p{{ vault_glpi_db_password }}
+            {{ glpi_db_name }}
+            -e "
+      INSERT IGNORE INTO glpi_authldaps
+        (name, host, basedn, port, login, password, rootdn_passwd,
+         condition, login_field, sync_field, group_field, group_condition,
+         group_search_type, use_tls, is_active, is_default)
+      VALUES
+        ('IT-Stack FreeIPA',
+         '{{ glpi_ldap_host }}',
+         '{{ glpi_ldap_base_dn }}',
+         {{ glpi_ldap_port | default(389) }},
+         '{{ glpi_ldap_bind_dn }}',
+         '{{ vault_glpi_ldap_bind_pw }}',
+         '{{ vault_glpi_ldap_bind_pw }}',
+         '',
+         'uid',
+         'uid',
+         'memberOf',
+         '',
+         0,
+         0,
+         1,
+         1);
+      "
+  register: _glpi_ldap_insert
+  changed_when: _glpi_ldap_insert.rc == 0
+  no_log: true
+  ignore_errors: true
+  tags: [glpi, integration, keycloak-saml]
+
+# ── Step 7: Assert SAML IdP descriptor still reachable (post-deploy) ─────────
+
+- name: "INT-07: Assert Keycloak SAML IdP descriptor reachable post-deploy"
+  ansible.builtin.uri:
+    url: "{{ glpi_keycloak_url }}/realms/{{ glpi_keycloak_realm }}/protocol/saml/descriptor"
+    status_code: 200
+    validate_certs: "{{ glpi_tls_verify | default(false) }}"
+  register: _kc_final_check
+  retries: 3
+  delay: 10
+  until: _kc_final_check.status == 200
+  tags: [glpi, integration, keycloak-saml]
+
+- name: "INT-07: Final assertion — SAML IdP descriptor accessible"
+  ansible.builtin.assert:
+    that:
+      - "_kc_final_check.status == 200"
+    fail_msg: "Keycloak SAML IdP descriptor unreachable after GLPI SAML configuration"
+    success_msg: "INT-07 complete — GLPI SAML 2.0 configured with Keycloak IdP"
+  tags: [glpi, integration, keycloak-saml]

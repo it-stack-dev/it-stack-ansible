@@ -8,3 +8,8 @@
 - name: "Import glpi configuration tasks"
   ansible.builtin.import_tasks: configure.yml
   tags: [glpi, configure]
+
+- name: "INT-07: Import Keycloak SAML integration tasks"
+  ansible.builtin.import_tasks: keycloak-saml.yml
+  tags: [glpi, integration, keycloak-saml]
+  when: glpi_enable_keycloak_saml | default(true) | bool
