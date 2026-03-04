@@ -1,0 +1,94 @@
+---
+# =============================================================================
+# INT-10: Zammad ← FreePBX CTI phone channel + ticket auto-creation
+# Configures Zammad CTI Generic API channel so Zammad accepts call events
+# from FreePBX and creates phone tickets automatically.
+# =============================================================================
+
+- name: "INT-10 | Assert FreePBX web admin reachable"
+  ansible.builtin.uri:
+    url: "{{ zammad_freepbx_url }}/admin/config.php"
+    method: GET
+    status_code: [200, 302, 401, 403]
+    validate_certs: "{{ zammad_tls_verify | default(false) }}"
+    timeout: 15
+  register: _freepbx_web_check
+  retries: 4
+  delay: 10
+  until: _freepbx_web_check.status in [200, 302, 401, 403]
+  tags: [zammad, integration, freepbx-cti]
+
+- name: "INT-10 | Assert FreePBX REST API reachable"
+  ansible.builtin.uri:
+    url: "{{ zammad_freepbx_url }}/api/rest.php"
+    method: GET
+    status_code: [200, 302, 401, 403, 404]
+    validate_certs: "{{ zammad_tls_verify | default(false) }}"
+    timeout: 15
+  register: _freepbx_api_check
+  retries: 4
+  delay: 10
+  until: _freepbx_api_check.status in [200, 302, 401, 403, 404]
+  tags: [zammad, integration, freepbx-cti]
+
+- name: "INT-10 | Set FreePBX CTI facts for Zammad"
+  ansible.builtin.set_fact:
+    _zammad_freepbx_url: "{{ zammad_freepbx_url }}"
+    _zammad_freepbx_ami_host: "{{ zammad_freepbx_ami_host }}"
+    _zammad_freepbx_ami_port: "{{ zammad_freepbx_ami_port | default('5038') }}"
+    _zammad_freepbx_ami_user: "{{ zammad_freepbx_ami_user }}"
+    _zammad_freepbx_ami_pass: "{{ vault_zammad_freepbx_ami_pass }}"
+    _zammad_phone_channel_name: "{{ zammad_phone_channel_name | default('FreePBX CTI') }}"
+  tags: [zammad, integration, freepbx-cti]
+
+- name: "INT-10 | Deploy Zammad FreePBX CTI channel config JSON"
+  ansible.builtin.template:
+    src: zammad-freepbx-cti.json.j2
+    dest: "{{ zammad_config_dir }}/freepbx-cti.json"
+    owner: "{{ zammad_user | default('zammad') }}"
+    group: "{{ zammad_group | default('zammad') }}"
+    mode: "0640"
+  notify: reload zammad configuration
+  tags: [zammad, integration, freepbx-cti]
+
+- name: "INT-10 | Register FreePBX CTI phone channel in Zammad via API"
+  ansible.builtin.uri:
+    url: "{{ zammad_public_url }}/api/v1/channels"
+    method: POST
+    headers:
+      Authorization: "Token token={{ zammad_api_token }}"
+      Content-Type: "application/json"
+    body_format: json
+    body:
+      adapter: "cti_generic_api"
+      options:
+        name: "{{ _zammad_phone_channel_name }}"
+        inbound:
+          adapter: "http"
+          options:
+            host: "{{ _zammad_freepbx_ami_host }}"
+            port: "{{ _zammad_freepbx_ami_port }}"
+        outbound:
+          adapter: "http"
+          options:
+            url: "{{ _zammad_freepbx_url }}/api/rest.php"
+            user: "{{ _zammad_freepbx_ami_user }}"
+            password: "{{ _zammad_freepbx_ami_pass }}"
+    status_code: [200, 201, 422]
+    validate_certs: "{{ zammad_tls_verify | default(false) }}"
+    timeout: 30
+  register: _zammad_cti_channel_result
+  failed_when: _zammad_cti_channel_result.status not in [200, 201, 422]
+  notify: reload zammad configuration
+  tags: [zammad, integration, freepbx-cti]
+
+- name: "INT-10 | Flush handlers (reload Zammad configuration)"
+  ansible.builtin.meta: flush_handlers
+  tags: [zammad, integration, freepbx-cti]
+
+- name: "INT-10 | Assert FreePBX CTI config JSON was deployed"
+  ansible.builtin.stat:
+    path: "{{ zammad_config_dir }}/freepbx-cti.json"
+  register: _zammad_freepbx_cti_stat
+  failed_when: not _zammad_freepbx_cti_stat.stat.exists
+  tags: [zammad, integration, freepbx-cti]

@@ -13,3 +13,8 @@
   ansible.builtin.import_tasks: suitecrm-cti.yml
   tags: [freepbx, integration, suitecrm-cti]
   when: freepbx_enable_suitecrm_cti | default(true) | bool
+
+- name: "INT-10: Import Zammad webhook integration tasks"
+  ansible.builtin.import_tasks: zammad-webhook.yml
+  tags: [freepbx, integration, zammad-webhook]
+  when: freepbx_enable_zammad_webhook | default(true) | bool

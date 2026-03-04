@@ -13,3 +13,8 @@
   ansible.builtin.import_tasks: keycloak-oidc.yml
   tags: [zammad, integration, keycloak-oidc]
   when: zammad_enable_keycloak_oidc | default(true) | bool
+
+- name: "INT-10: Import FreePBX CTI integration tasks"
+  ansible.builtin.import_tasks: freepbx-cti.yml
+  tags: [zammad, integration, freepbx-cti]
+  when: zammad_enable_freepbx_cti | default(true) | bool

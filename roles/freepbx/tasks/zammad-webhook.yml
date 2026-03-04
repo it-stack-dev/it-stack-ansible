@@ -1,0 +1,76 @@
+---
+# =============================================================================
+# INT-10: FreePBX → Zammad auto-ticket creation (phone call webhook)
+# Configures AGI + dialplan so FreePBX POSTs call events to Zammad REST API
+# /api/v1/tickets — creates a Zammad phone ticket for every call.
+# =============================================================================
+
+- name: "INT-10 | Assert Zammad tickets API reachable"
+  ansible.builtin.uri:
+    url: "{{ freepbx_zammad_url }}/api/v1/tickets"
+    method: GET
+    headers:
+      Authorization: "Token token={{ freepbx_zammad_api_token }}"
+    status_code: [200, 401, 403, 422]
+    validate_certs: "{{ freepbx_tls_verify | default(false) }}"
+    timeout: 15
+  register: _zammad_tickets_check
+  retries: 4
+  delay: 10
+  until: _zammad_tickets_check.status in [200, 401, 403, 422]
+  tags: [freepbx, integration, zammad-webhook]
+
+- name: "INT-10 | Assert Zammad users API reachable"
+  ansible.builtin.uri:
+    url: "{{ freepbx_zammad_url }}/api/v1/users"
+    method: GET
+    headers:
+      Authorization: "Token token={{ freepbx_zammad_api_token }}"
+    status_code: [200, 401, 403]
+    validate_certs: "{{ freepbx_tls_verify | default(false) }}"
+    timeout: 15
+  register: _zammad_users_check
+  retries: 4
+  delay: 10
+  until: _zammad_users_check.status in [200, 401, 403]
+  tags: [freepbx, integration, zammad-webhook]
+
+- name: "INT-10 | Set Zammad webhook integration facts"
+  ansible.builtin.set_fact:
+    _freepbx_zammad_url: "{{ freepbx_zammad_url }}"
+    _freepbx_zammad_api_token: "{{ freepbx_zammad_api_token }}"
+    _freepbx_zammad_ticket_group: "{{ freepbx_zammad_ticket_group | default('Users') }}"
+    _freepbx_zammad_conf_path: "{{ freepbx_asterisk_confdir }}/zammad_webhook.conf"
+    _freepbx_zammad_agi_path: "{{ freepbx_agi_bin_dir }}/zammad_ticket.py"
+  tags: [freepbx, integration, zammad-webhook]
+
+- name: "INT-10 | Deploy Asterisk zammad_webhook.conf dialplan"
+  ansible.builtin.template:
+    src: freepbx-zammad-webhook.conf.j2
+    dest: "{{ _freepbx_zammad_conf_path }}"
+    owner: "{{ freepbx_system_user | default('asterisk') }}"
+    group: "{{ freepbx_system_group | default('asterisk') }}"
+    mode: "0644"
+  notify: reload asterisk dialplan
+  tags: [freepbx, integration, zammad-webhook]
+
+- name: "INT-10 | Deploy Zammad ticket AGI script"
+  ansible.builtin.template:
+    src: freepbx-zammad-webhook.py.j2
+    dest: "{{ _freepbx_zammad_agi_path }}"
+    owner: "{{ freepbx_system_user | default('asterisk') }}"
+    group: "{{ freepbx_system_group | default('asterisk') }}"
+    mode: "0750"
+  notify: reload asterisk dialplan
+  tags: [freepbx, integration, zammad-webhook]
+
+- name: "INT-10 | Flush handlers (reload Asterisk dialplan)"
+  ansible.builtin.meta: flush_handlers
+  tags: [freepbx, integration, zammad-webhook]
+
+- name: "INT-10 | Assert Zammad webhook conf deployed"
+  ansible.builtin.stat:
+    path: "{{ _freepbx_zammad_conf_path }}"
+  register: _zammad_webhook_conf_stat
+  failed_when: not _zammad_webhook_conf_stat.stat.exists
+  tags: [freepbx, integration, zammad-webhook]
