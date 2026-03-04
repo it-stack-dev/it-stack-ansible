@@ -8,3 +8,8 @@
 - name: "Import odoo configuration tasks"
   ansible.builtin.import_tasks: configure.yml
   tags: [odoo, configure]
+
+- name: "INT-05: Import Keycloak OIDC integration tasks"
+  ansible.builtin.import_tasks: keycloak-oidc.yml
+  tags: [odoo, integration, keycloak-oidc]
+  when: odoo_enable_keycloak_oidc | default(true) | bool

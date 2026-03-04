@@ -1,0 +1,364 @@
+---
+# roles/odoo/tasks/keycloak-oidc.yml
+# INT-05: Configure Odoo authentication via Keycloak OIDC
+# Requires: Keycloak running with 'odoo' OIDC client already provisioned
+#           (handled by roles/keycloak/tasks/oidc-clients.yml)
+# Approach: Odoo JSON-RPC API — ir.module.module / auth.oauth.provider / ir.config_parameter
+
+- name: "INT-05 | Set OIDC helper variables"
+  ansible.builtin.set_fact:
+    _odoo_url:     "http://localhost:{{ odoo_http_port }}"
+    _odoo_db:      "{{ odoo_db_name }}"
+    _kc_base:      "{{ odoo_keycloak_url }}/realms/{{ odoo_keycloak_realm }}"
+    _odoo_headers:
+      Content-Type: "application/json"
+  tags: [odoo, integration, keycloak-oidc]
+
+# ── Step 1: Assert Keycloak OIDC discovery is reachable ─────────────────────
+- name: "INT-05 | Assert Keycloak OIDC discovery URL is reachable"
+  ansible.builtin.uri:
+    url: "{{ _kc_base }}/.well-known/openid-configuration"
+    method: GET
+    status_code: 200
+    validate_certs: "{{ odoo_tls_verify | default(false) }}"
+  register: _kc_discovery
+  retries: 5
+  delay: 15
+  until: _kc_discovery.status == 200
+  tags: [odoo, integration, keycloak-oidc]
+
+- name: "INT-05 | Assert Keycloak discovery has token_endpoint"
+  ansible.builtin.assert:
+    that:
+      - "_kc_discovery.json.token_endpoint is defined"
+      - "_kc_discovery.json.authorization_endpoint is defined"
+    success_msg: "Keycloak OIDC discovery valid — token_endpoint and authorization_endpoint present"
+    fail_msg: "Keycloak OIDC discovery missing required endpoints"
+  tags: [odoo, integration, keycloak-oidc]
+
+# ── Step 2: Authenticate to Odoo JSON-RPC ───────────────────────────────────
+- name: "INT-05 | Authenticate to Odoo admin session"
+  ansible.builtin.uri:
+    url: "{{ _odoo_url }}/web/session/authenticate"
+    method: POST
+    body_format: json
+    body:
+      jsonrpc: "2.0"
+      method: call
+      id: 1
+      params:
+        db:       "{{ _odoo_db }}"
+        login:    "admin"
+        password: "{{ vault_odoo_admin_pass }}"
+    headers: "{{ _odoo_headers }}"
+    validate_certs: "{{ odoo_tls_verify | default(false) }}"
+    status_code: 200
+    return_content: true
+  register: _odoo_auth
+  retries: 6
+  delay: 20
+  until: >
+    _odoo_auth.status == 200 and
+    _odoo_auth.json is defined and
+    _odoo_auth.json.result is defined and
+    _odoo_auth.json.result.uid is defined
+  tags: [odoo, integration, keycloak-oidc]
+
+- name: "INT-05 | Extract Odoo session cookie"
+  ansible.builtin.set_fact:
+    _odoo_session: "{{ _odoo_auth.set_cookie | regex_search('session_id=([^;]+)', '\\1') | first }}"
+  tags: [odoo, integration, keycloak-oidc]
+
+# ── Step 3: Ensure auth_oauth module is installed ───────────────────────────
+- name: "INT-05 | Query auth_oauth module state"
+  ansible.builtin.uri:
+    url: "{{ _odoo_url }}/web/dataset/call_kw"
+    method: POST
+    body_format: json
+    body:
+      jsonrpc: "2.0"
+      method: call
+      id: 2
+      params:
+        model: ir.module.module
+        method: search_read
+        args:
+          - [["name", "=", "auth_oauth"]]
+        kwargs:
+          fields: ["name", "state"]
+          limit: 1
+    headers:
+      Content-Type: "application/json"
+      Cookie: "session_id={{ _odoo_session }}"
+    validate_certs: "{{ odoo_tls_verify | default(false) }}"
+    status_code: 200
+    return_content: true
+  register: _auth_oauth_state
+  tags: [odoo, integration, keycloak-oidc]
+
+- name: "INT-05 | Install auth_oauth module if not installed"
+  when: >
+    _auth_oauth_state.json.result | length > 0 and
+    _auth_oauth_state.json.result[0].state != 'installed'
+  block:
+    - name: "INT-05 | Get auth_oauth module ID"
+      ansible.builtin.set_fact:
+        _auth_oauth_id: "{{ _auth_oauth_state.json.result[0].id }}"
+
+    - name: "INT-05 | Trigger auth_oauth module install"
+      ansible.builtin.uri:
+        url: "{{ _odoo_url }}/web/dataset/call_kw"
+        method: POST
+        body_format: json
+        body:
+          jsonrpc: "2.0"
+          method: call
+          id: 3
+          params:
+            model: ir.module.module
+            method: button_immediate_install
+            args:
+              - ["{{ _auth_oauth_id }}"]
+            kwargs: {}
+        headers:
+          Content-Type: "application/json"
+          Cookie: "session_id={{ _odoo_session }}"
+        validate_certs: "{{ odoo_tls_verify | default(false) }}"
+        status_code: [200, 204]
+      tags: [odoo, integration, keycloak-oidc]
+
+    - name: "INT-05 | Wait for Odoo to restart after module install"
+      ansible.builtin.uri:
+        url: "{{ _odoo_url }}/web/login"
+        method: GET
+        status_code: 200
+        validate_certs: "{{ odoo_tls_verify | default(false) }}"
+      retries: 15
+      delay: 10
+      register: _odoo_up
+      until: _odoo_up.status == 200
+      tags: [odoo, integration, keycloak-oidc]
+
+    - name: "INT-05 | Re-authenticate after module install"
+      ansible.builtin.uri:
+        url: "{{ _odoo_url }}/web/session/authenticate"
+        method: POST
+        body_format: json
+        body:
+          jsonrpc: "2.0"
+          method: call
+          id: 4
+          params:
+            db:       "{{ _odoo_db }}"
+            login:    "admin"
+            password: "{{ vault_odoo_admin_pass }}"
+        headers: "{{ _odoo_headers }}"
+        validate_certs: "{{ odoo_tls_verify | default(false) }}"
+        status_code: 200
+        return_content: true
+      register: _odoo_auth
+      retries: 6
+      delay: 10
+      until: >
+        _odoo_auth.status == 200 and
+        _odoo_auth.json.result is defined and
+        _odoo_auth.json.result.uid is defined
+      tags: [odoo, integration, keycloak-oidc]
+
+    - name: "INT-05 | Refresh session cookie after re-auth"
+      ansible.builtin.set_fact:
+        _odoo_session: "{{ _odoo_auth.set_cookie | regex_search('session_id=([^;]+)', '\\1') | first }}"
+      tags: [odoo, integration, keycloak-oidc]
+  tags: [odoo, integration, keycloak-oidc]
+
+# ── Step 4: Create or update the Keycloak OIDC provider ─────────────────────
+- name: "INT-05 | Search for existing Keycloak OIDC provider"
+  ansible.builtin.uri:
+    url: "{{ _odoo_url }}/web/dataset/call_kw"
+    method: POST
+    body_format: json
+    body:
+      jsonrpc: "2.0"
+      method: call
+      id: 5
+      params:
+        model: auth.oauth.provider
+        method: search_read
+        args:
+          - [["client_id", "=", "{{ odoo_oidc_client }}"]]
+        kwargs:
+          fields: ["id", "name", "client_id", "enabled"]
+          limit: 1
+    headers:
+      Content-Type: "application/json"
+      Cookie: "session_id={{ _odoo_session }}"
+    validate_certs: "{{ odoo_tls_verify | default(false) }}"
+    status_code: 200
+    return_content: true
+  register: _kc_provider_search
+  tags: [odoo, integration, keycloak-oidc]
+
+- name: "INT-05 | Build OIDC provider payload"
+  ansible.builtin.set_fact:
+    _oidc_provider_vals:
+      name:                "Keycloak"
+      client_id:           "{{ odoo_oidc_client }}"
+      client_secret:       "{{ vault_odoo_oidc_secret | default('') }}"
+      auth_endpoint:       "{{ _kc_base }}/protocol/openid-connect/auth"
+      token_endpoint:      "{{ _kc_base }}/protocol/openid-connect/token"
+      validation_endpoint: "{{ _kc_base }}/protocol/openid-connect/userinfo"
+      jwks_base_url:       "{{ _kc_base }}/protocol/openid-connect/certs"
+      css_class:           "fa fa-lock"
+      enabled:             true
+      sequence:            10
+  tags: [odoo, integration, keycloak-oidc]
+
+- name: "INT-05 | Create Keycloak OIDC provider (not present)"
+  when: _kc_provider_search.json.result | length == 0
+  ansible.builtin.uri:
+    url: "{{ _odoo_url }}/web/dataset/call_kw"
+    method: POST
+    body_format: json
+    body:
+      jsonrpc: "2.0"
+      method: call
+      id: 6
+      params:
+        model: auth.oauth.provider
+        method: create
+        args:
+          - "{{ _oidc_provider_vals }}"
+        kwargs: {}
+    headers:
+      Content-Type: "application/json"
+      Cookie: "session_id={{ _odoo_session }}"
+    validate_certs: "{{ odoo_tls_verify | default(false) }}"
+    status_code: 200
+    return_content: true
+  register: _kc_provider_create
+  tags: [odoo, integration, keycloak-oidc]
+
+- name: "INT-05 | Update Keycloak OIDC provider (already present)"
+  when: _kc_provider_search.json.result | length > 0
+  ansible.builtin.uri:
+    url: "{{ _odoo_url }}/web/dataset/call_kw"
+    method: POST
+    body_format: json
+    body:
+      jsonrpc: "2.0"
+      method: call
+      id: 7
+      params:
+        model: auth.oauth.provider
+        method: write
+        args:
+          - ["{{ _kc_provider_search.json.result[0].id }}"]
+          - "{{ _oidc_provider_vals }}"
+        kwargs: {}
+    headers:
+      Content-Type: "application/json"
+      Cookie: "session_id={{ _odoo_session }}"
+    validate_certs: "{{ odoo_tls_verify | default(false) }}"
+    status_code: 200
+    return_content: true
+  register: _kc_provider_update
+  tags: [odoo, integration, keycloak-oidc]
+
+- name: "INT-05 | Log provider action"
+  ansible.builtin.debug:
+    msg: >-
+      Keycloak OIDC provider
+      {{ 'created (ID: ' + (_kc_provider_create.json.result | string) + ')' if _kc_provider_search.json.result | length == 0
+         else 'updated (ID: ' + (_kc_provider_search.json.result[0].id | string) + ')' }}
+  tags: [odoo, integration, keycloak-oidc]
+
+# ── Step 5: Set web.base.url system parameter ────────────────────────────────
+- name: "INT-05 | Search web.base.url system parameter"
+  ansible.builtin.uri:
+    url: "{{ _odoo_url }}/web/dataset/call_kw"
+    method: POST
+    body_format: json
+    body:
+      jsonrpc: "2.0"
+      method: call
+      id: 8
+      params:
+        model: ir.config_parameter
+        method: search_read
+        args:
+          - [["key", "=", "web.base.url"]]
+        kwargs:
+          fields: ["id", "key", "value"]
+          limit: 1
+    headers:
+      Content-Type: "application/json"
+      Cookie: "session_id={{ _odoo_session }}"
+    validate_certs: "{{ odoo_tls_verify | default(false) }}"
+    status_code: 200
+    return_content: true
+  register: _web_base_url_search
+  tags: [odoo, integration, keycloak-oidc]
+
+- name: "INT-05 | Update web.base.url to Odoo public hostname"
+  when: _web_base_url_search.json.result | length > 0
+  ansible.builtin.uri:
+    url: "{{ _odoo_url }}/web/dataset/call_kw"
+    method: POST
+    body_format: json
+    body:
+      jsonrpc: "2.0"
+      method: call
+      id: 9
+      params:
+        model: ir.config_parameter
+        method: write
+        args:
+          - ["{{ _web_base_url_search.json.result[0].id }}"]
+          - { value: "https://{{ odoo_hostname }}" }
+        kwargs: {}
+    headers:
+      Content-Type: "application/json"
+      Cookie: "session_id={{ _odoo_session }}"
+    validate_certs: "{{ odoo_tls_verify | default(false) }}"
+    status_code: 200
+    return_content: true
+  tags: [odoo, integration, keycloak-oidc]
+
+# ── Step 6: Assert provider is enabled ──────────────────────────────────────
+- name: "INT-05 | Assert Keycloak OIDC provider is enabled in Odoo"
+  ansible.builtin.uri:
+    url: "{{ _odoo_url }}/web/dataset/call_kw"
+    method: POST
+    body_format: json
+    body:
+      jsonrpc: "2.0"
+      method: call
+      id: 10
+      params:
+        model: auth.oauth.provider
+        method: search_read
+        args:
+          - [["client_id", "=", "{{ odoo_oidc_client }}"], ["enabled", "=", true]]
+        kwargs:
+          fields: ["id", "name", "enabled", "auth_endpoint"]
+          limit: 1
+    headers:
+      Content-Type: "application/json"
+      Cookie: "session_id={{ _odoo_session }}"
+    validate_certs: "{{ odoo_tls_verify | default(false) }}"
+    status_code: 200
+    return_content: true
+  register: _kc_provider_assert
+  tags: [odoo, integration, keycloak-oidc]
+
+- name: "INT-05 | Verify Keycloak provider found and enabled"
+  ansible.builtin.assert:
+    that:
+      - "_kc_provider_assert.json.result | length > 0"
+      - "_kc_provider_assert.json.result[0].enabled == true"
+    success_msg: >-
+      INT-05 complete — Keycloak OIDC provider '{{ _kc_provider_assert.json.result[0].name }}'
+      enabled in Odoo (ID {{ _kc_provider_assert.json.result[0].id }}).
+      Auth endpoint: {{ _kc_provider_assert.json.result[0].auth_endpoint }}
+    fail_msg: "Keycloak OIDC provider not found or not enabled in Odoo"
+  tags: [odoo, integration, keycloak-oidc]
