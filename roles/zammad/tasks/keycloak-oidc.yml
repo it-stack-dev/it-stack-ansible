@@ -1,0 +1,241 @@
+---
+# roles/zammad/tasks/keycloak-oidc.yml
+# INT-06: Configure Zammad authentication via Keycloak OIDC
+# Requires: Keycloak running with 'zammad' OIDC client already provisioned
+#           (handled by roles/keycloak/tasks/oidc-clients.yml)
+# Approach: Zammad REST API — /api/v1/users/signin (token) + /api/v1/channels (OIDC)
+
+- name: "INT-06 | Set OIDC helper variables"
+  ansible.builtin.set_fact:
+    _zammad_url:     "http://localhost:{{ zammad_http_port | default('3000') }}"
+    _kc_base:        "{{ zammad_keycloak_url }}/realms/{{ zammad_keycloak_realm }}"
+    _zammad_headers:
+      Content-Type: "application/json"
+  tags: [zammad, integration, keycloak-oidc]
+
+# ── Step 1: Assert Keycloak OIDC discovery is reachable ─────────────────────
+- name: "INT-06 | Assert Keycloak OIDC discovery URL is reachable"
+  ansible.builtin.uri:
+    url: "{{ _kc_base }}/.well-known/openid-configuration"
+    method: GET
+    status_code: 200
+    validate_certs: "{{ zammad_tls_verify | default(false) }}"
+  register: _kc_discovery
+  retries: 5
+  delay: 15
+  until: _kc_discovery.status == 200
+  tags: [zammad, integration, keycloak-oidc]
+
+- name: "INT-06 | Assert Keycloak discovery has required endpoints"
+  ansible.builtin.assert:
+    that:
+      - "_kc_discovery.json.token_endpoint is defined"
+      - "_kc_discovery.json.authorization_endpoint is defined"
+      - "_kc_discovery.json.userinfo_endpoint is defined"
+    success_msg: "Keycloak OIDC discovery valid — all required endpoints present"
+    fail_msg: "Keycloak OIDC discovery missing required endpoints"
+  tags: [zammad, integration, keycloak-oidc]
+
+# ── Step 2: Authenticate to Zammad REST API ──────────────────────────────────
+- name: "INT-06 | Obtain Zammad API token via admin sign-in"
+  ansible.builtin.uri:
+    url: "{{ _zammad_url }}/api/v1/users/signin"
+    method: POST
+    body_format: json
+    body:
+      username:    "{{ zammad_admin_email | default('admin@example.com') }}"
+      password:    "{{ vault_zammad_admin_pass }}"
+      fingerprint: "ansible-int06-oidc-{{ inventory_hostname }}"
+    headers: "{{ _zammad_headers }}"
+    validate_certs: "{{ zammad_tls_verify | default(false) }}"
+    status_code: 200
+    return_content: true
+  register: _zammad_auth
+  retries: 6
+  delay: 20
+  until: >
+    _zammad_auth.status == 200 and
+    _zammad_auth.json is defined and
+    _zammad_auth.json.token is defined
+  tags: [zammad, integration, keycloak-oidc]
+
+- name: "INT-06 | Set Zammad API token header"
+  ansible.builtin.set_fact:
+    _zammad_token_headers:
+      Content-Type: "application/json"
+      Authorization: "Token token={{ _zammad_auth.json.token }}"
+  tags: [zammad, integration, keycloak-oidc]
+
+# ── Step 3: Search for existing OIDC authentication channel ──────────────────
+- name: "INT-06 | List existing Zammad channels"
+  ansible.builtin.uri:
+    url: "{{ _zammad_url }}/api/v1/channels"
+    method: GET
+    headers: "{{ _zammad_token_headers }}"
+    validate_certs: "{{ zammad_tls_verify | default(false) }}"
+    status_code: 200
+    return_content: true
+  register: _zammad_channels
+  tags: [zammad, integration, keycloak-oidc]
+
+- name: "INT-06 | Identify existing Keycloak OIDC channel"
+  ansible.builtin.set_fact:
+    _existing_oidc: >-
+      {{ (_zammad_channels.json | selectattr('adapter','equalto','auth_oidc') |
+          selectattr('options','defined') |
+          selectattr('options.client_id','defined') |
+          selectattr('options.client_id','equalto', zammad_oidc_client) |
+          list) | first | default({}) }}
+  tags: [zammad, integration, keycloak-oidc]
+
+# ── Step 4: Build OIDC channel payload ───────────────────────────────────────
+- name: "INT-06 | Build OIDC channel payload"
+  ansible.builtin.set_fact:
+    _oidc_channel_payload:
+      adapter: "auth_oidc"
+      options:
+        name:         "Keycloak"
+        display_name: "Login with Keycloak"
+        issuer:       "{{ _kc_base }}"
+        uid_field:    "sub"
+        client_id:    "{{ zammad_oidc_client }}"
+        client_secret: "{{ vault_zammad_oidc_secret }}"
+        scope:        "openid profile email"
+  tags: [zammad, integration, keycloak-oidc]
+
+# ── Step 5: Create OIDC channel if absent ────────────────────────────────────
+- name: "INT-06 | Create Keycloak OIDC channel (not present)"
+  when: _existing_oidc | length == 0
+  ansible.builtin.uri:
+    url: "{{ _zammad_url }}/api/v1/channels"
+    method: POST
+    body_format: json
+    body: "{{ _oidc_channel_payload }}"
+    headers: "{{ _zammad_token_headers }}"
+    validate_certs: "{{ zammad_tls_verify | default(false) }}"
+    status_code: [200, 201, 422]
+    return_content: true
+  register: _oidc_channel_create
+  tags: [zammad, integration, keycloak-oidc]
+
+- name: "INT-06 | Log OIDC channel create result"
+  when: _existing_oidc | length == 0
+  ansible.builtin.debug:
+    msg: >-
+      Keycloak OIDC channel {{ 'created (HTTP ' + (_oidc_channel_create.status | string) + ')'
+        if _oidc_channel_create is defined else 'skipped' }}
+  tags: [zammad, integration, keycloak-oidc]
+
+# ── Step 6: Update OIDC channel if already present ───────────────────────────
+- name: "INT-06 | Update Keycloak OIDC channel (already present)"
+  when: _existing_oidc | length > 0
+  ansible.builtin.uri:
+    url: "{{ _zammad_url }}/api/v1/channels/{{ _existing_oidc.id }}"
+    method: PUT
+    body_format: json
+    body: "{{ _oidc_channel_payload }}"
+    headers: "{{ _zammad_token_headers }}"
+    validate_certs: "{{ zammad_tls_verify | default(false) }}"
+    status_code: [200, 201, 422]
+    return_content: true
+  register: _oidc_channel_update
+  tags: [zammad, integration, keycloak-oidc]
+
+- name: "INT-06 | Log OIDC channel update result"
+  when: _existing_oidc | length > 0
+  ansible.builtin.debug:
+    msg: "Keycloak OIDC channel updated (ID: {{ _existing_oidc.id }}, HTTP {{ _oidc_channel_update.status }})"
+  tags: [zammad, integration, keycloak-oidc]
+
+# ── Step 7: Configure Zammad LDAP source (FreeIPA-style) ─────────────────────
+- name: "INT-06 | List existing Zammad LDAP configs"
+  ansible.builtin.uri:
+    url: "{{ _zammad_url }}/api/v1/ldap_configs"
+    method: GET
+    headers: "{{ _zammad_token_headers }}"
+    validate_certs: "{{ zammad_tls_verify | default(false) }}"
+    status_code: [200, 404]
+    return_content: true
+  register: _zammad_ldap_configs
+  tags: [zammad, integration, keycloak-oidc]
+
+- name: "INT-06 | Identify existing IT-Stack LDAP config"
+  ansible.builtin.set_fact:
+    _existing_ldap_cfg: >-
+      {{ ((_zammad_ldap_configs.json if _zammad_ldap_configs.status == 200 else []) |
+          selectattr('host','equalto', zammad_ldap_host) |
+          list) | first | default({}) }}
+  tags: [zammad, integration, keycloak-oidc]
+
+- name: "INT-06 | Build LDAP config payload"
+  ansible.builtin.set_fact:
+    _ldap_config_payload:
+      name:     "IT-Stack OpenLDAP"
+      host:     "{{ zammad_ldap_host }}"
+      port:     "{{ zammad_ldap_port | default(389) }}"
+      bind_dn:  "{{ zammad_ldap_bind_dn }}"
+      bind_pw:  "{{ vault_zammad_ldap_bind_pw }}"
+      base_dn:  "{{ zammad_ldap_base_dn }}"
+      uid:      "uid"
+      last_name:  "sn"
+      first_name: "givenName"
+      email:    "mail"
+      active:   true
+  tags: [zammad, integration, keycloak-oidc]
+
+- name: "INT-06 | Create LDAP config (not present)"
+  when: _existing_ldap_cfg | length == 0
+  ansible.builtin.uri:
+    url: "{{ _zammad_url }}/api/v1/ldap_configs"
+    method: POST
+    body_format: json
+    body: "{{ _ldap_config_payload }}"
+    headers: "{{ _zammad_token_headers }}"
+    validate_certs: "{{ zammad_tls_verify | default(false) }}"
+    status_code: [200, 201, 422]
+    return_content: true
+  register: _ldap_config_create
+  tags: [zammad, integration, keycloak-oidc]
+
+- name: "INT-06 | Update LDAP config (already present)"
+  when: _existing_ldap_cfg | length > 0
+  ansible.builtin.uri:
+    url: "{{ _zammad_url }}/api/v1/ldap_configs/{{ _existing_ldap_cfg.id }}"
+    method: PUT
+    body_format: json
+    body: "{{ _ldap_config_payload }}"
+    headers: "{{ _zammad_token_headers }}"
+    validate_certs: "{{ zammad_tls_verify | default(false) }}"
+    status_code: [200, 201, 422]
+    return_content: true
+  register: _ldap_config_update
+  tags: [zammad, integration, keycloak-oidc]
+
+# ── Step 8: Assert OIDC channel is present (final check) ────────────────────
+- name: "INT-06 | Re-list channels to verify OIDC channel exists"
+  ansible.builtin.uri:
+    url: "{{ _zammad_url }}/api/v1/channels"
+    method: GET
+    headers: "{{ _zammad_token_headers }}"
+    validate_certs: "{{ zammad_tls_verify | default(false) }}"
+    status_code: 200
+    return_content: true
+  register: _zammad_channels_check
+  tags: [zammad, integration, keycloak-oidc]
+
+- name: "INT-06 | Assert Keycloak OIDC channel present in Zammad"
+  ansible.builtin.assert:
+    that:
+      - >-
+        (_zammad_channels_check.json |
+         selectattr('adapter','equalto','auth_oidc') |
+         selectattr('options.client_id','equalto', zammad_oidc_client) |
+         list | length) > 0
+    success_msg: >-
+      INT-06 complete — Keycloak OIDC channel for client '{{ zammad_oidc_client }}'
+      is configured in Zammad.
+      Issuer: {{ _kc_base }}
+    fail_msg: >-
+      Keycloak OIDC channel with client_id '{{ zammad_oidc_client }}' not found in
+      Zammad channels. OIDC create/update may have failed.
+  tags: [zammad, integration, keycloak-oidc]

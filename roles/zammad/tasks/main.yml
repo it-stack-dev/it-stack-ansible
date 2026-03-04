@@ -8,3 +8,8 @@
 - name: "Import zammad configuration tasks"
   ansible.builtin.import_tasks: configure.yml
   tags: [zammad, configure]
+
+- name: "INT-06: Import Keycloak OIDC integration tasks"
+  ansible.builtin.import_tasks: keycloak-oidc.yml
+  tags: [zammad, integration, keycloak-oidc]
+  when: zammad_enable_keycloak_oidc | default(true) | bool
