@@ -23,3 +23,8 @@
   ansible.builtin.import_tasks: odoo-sync.yml
   tags: [suitecrm, integration, odoo-sync]
   when: suitecrm_enable_odoo_sync | default(true) | bool
+
+- name: "INT-13: Import Nextcloud CalDAV calendar sync tasks"
+  ansible.builtin.import_tasks: nextcloud-caldav.yml
+  tags: [suitecrm, integration, nextcloud-caldav]
+  when: suitecrm_enable_nextcloud_caldav | default(true) | bool

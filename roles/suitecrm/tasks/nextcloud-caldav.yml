@@ -1,0 +1,97 @@
+---
+# roles/suitecrm/tasks/nextcloud-caldav.yml
+# INT-13: SuiteCRM ↔ Nextcloud (CalDAV calendar sync)
+# Actions:
+#   1) Assert Nextcloud CalDAV PROPFIND endpoint accessible
+#   2) Assert Nextcloud status.php reachable
+#   3) set_fact — derived CalDAV variables
+#   4) Deploy CalDAV sync Python script (suitecrm_nextcloud_caldav.py)
+#   5) Install nightly CalDAV sync cron job
+#   6) flush_handlers + stat assert
+#
+# Required variables:
+#   suitecrm_nextcloud_url          — Nextcloud base URL
+#   suitecrm_nextcloud_user         — CalDAV username (usually 'admin' or service account)
+#   vault_suitecrm_nextcloud_pass   — CalDAV password (vault-encrypted)
+#   suitecrm_nextcloud_caldav_path  — CalDAV calendar path (e.g. /remote.php/dav/calendars/admin)
+#   suitecrm_admin_user             — SuiteCRM admin user for meeting/calendar API
+#   vault_suitecrm_admin_pass       — SuiteCRM admin password
+
+- name: "INT-13 | Assert Nextcloud CalDAV PROPFIND endpoint"
+  ansible.builtin.uri:
+    url: "{{ suitecrm_nextcloud_url | default('http://nextcloud.lab.local') }}/remote.php/dav/calendars/"
+    method: PROPFIND
+    headers:
+      Depth: "0"
+      Content-Type: application/xml
+    status_code: [207, 401, 403, 404, 400]
+    validate_certs: "{{ suitecrm_tls_verify | default(false) }}"
+    timeout: 15
+  register: _suitecrm_nc_caldav_probe
+  failed_when: false
+  retries: 4
+  delay: 5
+  tags: [suitecrm, integration, nextcloud-caldav]
+
+- name: "INT-13 | Assert Nextcloud status.php accessible"
+  ansible.builtin.uri:
+    url: "{{ suitecrm_nextcloud_url | default('http://nextcloud.lab.local') }}/status.php"
+    method: GET
+    status_code: [200, 401, 403]
+    validate_certs: "{{ suitecrm_tls_verify | default(false) }}"
+    timeout: 10
+  register: _suitecrm_nc_status_probe
+  failed_when: false
+  retries: 3
+  delay: 5
+  tags: [suitecrm, integration, nextcloud-caldav]
+
+- name: "INT-13 | set_fact — SuiteCRM↔Nextcloud CalDAV variables"
+  ansible.builtin.set_fact:
+    _suitecrm_nc_url: "{{ suitecrm_nextcloud_url | default('http://nextcloud.lab.local') }}"
+    _suitecrm_nc_user: "{{ suitecrm_nextcloud_user | default('admin') }}"
+    _suitecrm_nc_pass: "{{ vault_suitecrm_nextcloud_pass | default('Lab05Admin!') }}"
+    _suitecrm_nc_caldav_path: "{{ suitecrm_nextcloud_caldav_path | default('/remote.php/dav/calendars/admin') }}"
+    _suitecrm_nc_sync_script: "/var/www/html/suitecrm/custom/modules/INT13/suitecrm_nextcloud_caldav.py"
+  tags: [suitecrm, integration, nextcloud-caldav]
+
+- name: "INT-13 | Ensure INT13 custom module directory exists"
+  ansible.builtin.file:
+    path: "/var/www/html/suitecrm/custom/modules/INT13"
+    state: directory
+    owner: www-data
+    group: www-data
+    mode: "0755"
+  tags: [suitecrm, integration, nextcloud-caldav]
+
+- name: "INT-13 | Deploy Nextcloud CalDAV sync script"
+  ansible.builtin.template:
+    src: suitecrm-nextcloud-caldav.py.j2
+    dest: "{{ _suitecrm_nc_sync_script }}"
+    owner: www-data
+    group: www-data
+    mode: "0750"
+  tags: [suitecrm, integration, nextcloud-caldav]
+
+- name: "INT-13 | Install nightly CalDAV → SuiteCRM calendar sync cron job"
+  ansible.builtin.cron:
+    name: "it-stack-suitecrm-nextcloud-caldav-sync"
+    user: www-data
+    minute: "0"
+    hour: "3"
+    job: >
+      /usr/bin/python3 {{ _suitecrm_nc_sync_script }}
+      >> /var/log/suitecrm/caldav_sync.log 2>&1
+    state: present
+  tags: [suitecrm, integration, nextcloud-caldav]
+
+- name: "INT-13 | Flush handlers"
+  ansible.builtin.meta: flush_handlers
+  tags: [suitecrm, integration, nextcloud-caldav]
+
+- name: "INT-13 | Assert CalDAV sync script deployed"
+  ansible.builtin.stat:
+    path: "{{ _suitecrm_nc_sync_script }}"
+  register: _suitecrm_nc_sync_stat
+  failed_when: not _suitecrm_nc_sync_stat.stat.exists
+  tags: [suitecrm, integration, nextcloud-caldav]

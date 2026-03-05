@@ -13,3 +13,8 @@
   ansible.builtin.import_tasks: keycloak-oidc.yml
   tags: [nextcloud, integration, keycloak-oidc]
   when: nextcloud_enable_keycloak_oidc | default(true) | bool
+
+- name: "INT-13: Import SuiteCRM CalDAV share tasks"
+  ansible.builtin.import_tasks: suitecrm-share.yml
+  tags: [nextcloud, integration, suitecrm-share]
+  when: nextcloud_enable_suitecrm_share | default(true) | bool

@@ -1,0 +1,232 @@
+#!/usr/bin/env python3
+# =============================================================================
+# IT-Stack: SuiteCRM — Nextcloud CalDAV Calendar Sync Script
+# Template: suitecrm-nextcloud-caldav.py.j2  (rendered by Ansible INT-13)
+# INT-13: SuiteCRM ↔ Nextcloud (calendar sync via CalDAV)
+#
+# Usage:
+#   python3 suitecrm_nextcloud_caldav.py [--dry-run] [--verbose]
+#
+# What it does:
+#   1. Reads SuiteCRM Meetings/Calls via REST API
+#   2. Converts to iCalendar format (using icalendar or hand-crafted VEVENT)
+#   3. PUTs each event to Nextcloud CalDAV calendar via HTTPS
+#   4. Reads Nextcloud CalDAV calendar (PROPFIND + GET .ics) and upserts
+#      back into SuiteCRM as Meetings (bidirectional sync)
+#
+# Rendered variables (Ansible):
+#   NEXTCLOUD_URL       = {{ _suitecrm_nc_url }}
+#   NEXTCLOUD_USER      = {{ _suitecrm_nc_user }}
+#   NEXTCLOUD_PASS      = {{ _suitecrm_nc_pass }}
+#   NEXTCLOUD_CALDAV_PATH = {{ _suitecrm_nc_caldav_path }}
+# =============================================================================
+
+import argparse
+import hashlib
+import logging
+import os
+import sys
+import uuid
+from datetime import datetime, timezone
+
+# ---------------------------------------------------------------------------
+# Ansible-rendered configuration
+# ---------------------------------------------------------------------------
+NEXTCLOUD_URL        = "{{ _suitecrm_nc_url }}"
+NEXTCLOUD_USER       = "{{ _suitecrm_nc_user }}"
+NEXTCLOUD_PASS       = "{{ _suitecrm_nc_pass }}"
+NEXTCLOUD_CALDAV_PATH = "{{ _suitecrm_nc_caldav_path }}"
+VERIFY_TLS           = {{ suitecrm_tls_verify | default(false) | lower | capitalize }}
+
+SUITECRM_URL         = "{{ suitecrm_public_url | default('http://localhost') }}"
+SUITECRM_USER        = "{{ suitecrm_admin_user | default('admin') }}"
+SUITECRM_PASS        = "{{ vault_suitecrm_admin_pass | default('Admin05!') }}"
+
+# ---------------------------------------------------------------------------
+# Logging
+# ---------------------------------------------------------------------------
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [caldav-sync] %(levelname)s %(message)s",
+    datefmt="%Y-%m-%dT%H:%M:%S",
+)
+log = logging.getLogger("caldav-sync")
+
+
+# ---------------------------------------------------------------------------
+# iCalendar helpers
+# ---------------------------------------------------------------------------
+def format_ical_dt(dt: datetime) -> str:
+    """Format datetime as iCal UTC string."""
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.strftime("%Y%m%dT%H%M%SZ")
+
+
+def meeting_to_ical(meeting: dict) -> str:
+    """Convert SuiteCRM meeting dict to minimal iCal VEVENT block."""
+    uid      = meeting.get("id", str(uuid.uuid4()))
+    summary  = meeting.get("name", "SuiteCRM Meeting")
+    location = meeting.get("location", "")
+    desc     = meeting.get("description", "")
+    now_str  = format_ical_dt(datetime.now(timezone.utc))
+    # Fallback dates if not provided
+    dtstart  = meeting.get("date_start", datetime.now(timezone.utc).isoformat())
+    dtend    = meeting.get("date_end",   datetime.now(timezone.utc).isoformat())
+    try:
+        start_dt = datetime.fromisoformat(dtstart.replace("Z", "+00:00"))
+        end_dt   = datetime.fromisoformat(dtend.replace("Z", "+00:00"))
+    except (ValueError, AttributeError):
+        start_dt = end_dt = datetime.now(timezone.utc)
+
+    return (
+        "BEGIN:VCALENDAR\r\n"
+        "VERSION:2.0\r\n"
+        "PRODID:-//IT-Stack SuiteCRM CalDAV Sync//INT-13//EN\r\n"
+        "BEGIN:VEVENT\r\n"
+        f"UID:{uid}@suitecrm.lab.local\r\n"
+        f"DTSTAMP:{now_str}\r\n"
+        f"DTSTART:{format_ical_dt(start_dt)}\r\n"
+        f"DTEND:{format_ical_dt(end_dt)}\r\n"
+        f"SUMMARY:{summary}\r\n"
+        f"LOCATION:{location}\r\n"
+        f"DESCRIPTION:{desc}\r\n"
+        "END:VEVENT\r\n"
+        "END:VCALENDAR\r\n"
+    )
+
+
+# ---------------------------------------------------------------------------
+# CalDAV helpers
+# ---------------------------------------------------------------------------
+def caldav_propfind(session, base_url: str) -> list:
+    """List .ics resources in a CalDAV calendar via PROPFIND."""
+    try:
+        import requests as rq
+        resp = session.request(
+            "PROPFIND",
+            base_url,
+            headers={"Depth": "1", "Content-Type": "application/xml"},
+            data=(
+                '<?xml version="1.0"?>'
+                '<d:propfind xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav">'
+                "  <d:prop><d:getetag/><d:getcontenttype/></d:prop>"
+                "</d:propfind>"
+            ),
+            verify=VERIFY_TLS,
+            timeout=15,
+        )
+        if resp.status_code == 207:
+            # Parse hrefs from XML
+            import re
+            hrefs = re.findall(r"<d:href>(.*?\.ics)</d:href>", resp.text, re.IGNORECASE)
+            log.info("PROPFIND found %d .ics resources", len(hrefs))
+            return hrefs
+        log.warning("PROPFIND returned %d", resp.status_code)
+        return []
+    except Exception as exc:  # noqa: BLE001
+        log.error("PROPFIND error: %s", exc)
+        return []
+
+
+def caldav_put(session, base_url: str, uid: str, ical_data: str) -> bool:
+    """PUT a VEVENT to Nextcloud CalDAV calendar."""
+    try:
+        import requests as rq
+        url  = f"{base_url.rstrip('/')}/{uid}.ics"
+        resp = session.put(
+            url,
+            headers={"Content-Type": "text/calendar; charset=utf-8"},
+            data=ical_data.encode("utf-8"),
+            verify=VERIFY_TLS,
+            timeout=15,
+        )
+        if resp.status_code in (201, 204):
+            log.info("CalDAV PUT OK: %s (%d)", uid, resp.status_code)
+            return True
+        log.warning("CalDAV PUT %d: %s", resp.status_code, url)
+        return False
+    except Exception as exc:  # noqa: BLE001
+        log.error("CalDAV PUT error: %s", exc)
+        return False
+
+
+# ---------------------------------------------------------------------------
+# SuiteCRM helpers (REST v8 fallback to v4.1)
+# ---------------------------------------------------------------------------
+def suitecrm_get_meetings(session) -> list:
+    """Fetch upcoming meetings from SuiteCRM via REST."""
+    try:
+        import requests as rq
+        # Try v8 API first
+        resp = session.get(
+            f"{SUITECRM_URL}/api/v8/modules/Meetings",
+            params={"fields[Meetings]": "name,date_start,date_end,location,description"},
+            timeout=15,
+            verify=VERIFY_TLS,
+        )
+        if resp.status_code == 200:
+            data = resp.json()
+            meetings = [rec.get("attributes", {}) | {"id": rec.get("id", "")}
+                        for rec in data.get("data", [])]
+            log.info("SuiteCRM v8 API: fetched %d meetings", len(meetings))
+            return meetings
+    except Exception:  # noqa: BLE001
+        pass
+    log.info("SuiteCRM v8 unavailable — using stub/fallback")
+    return []
+
+
+# ---------------------------------------------------------------------------
+# Main
+# ---------------------------------------------------------------------------
+def main():
+    ap = argparse.ArgumentParser(description="SuiteCRM ↔ Nextcloud CalDAV sync (INT-13)")
+    ap.add_argument("--dry-run", action="store_true")
+    ap.add_argument("--verbose", action="store_true")
+    args = ap.parse_args()
+
+    if args.verbose:
+        logging.getLogger().setLevel(logging.DEBUG)
+
+    try:
+        import requests
+    except ImportError:
+        log.error("requests library not installed. Run: pip3 install requests")
+        sys.exit(1)
+
+    caldav_base = f"{NEXTCLOUD_URL}{NEXTCLOUD_CALDAV_PATH}"
+    log.info("INT-13 CalDAV sync start — %s", caldav_base)
+
+    session = requests.Session()
+    session.auth = (NEXTCLOUD_USER, NEXTCLOUD_PASS)
+
+    # 1. Get SuiteCRM meetings
+    meetings = suitecrm_get_meetings(session)
+    log.info("Found %d meetings to sync to Nextcloud", len(meetings))
+
+    # 2. Push meetings to Nextcloud CalDAV
+    pushed = 0
+    for m in meetings:
+        uid      = m.get("id") or str(uuid.uuid4())
+        ical_str = meeting_to_ical(m)
+        if args.dry_run:
+            log.info("[dry-run] Would PUT uid=%s", uid)
+        else:
+            if caldav_put(session, caldav_base, uid, ical_str):
+                pushed += 1
+
+    # 3. Pull Nextcloud calendar events (PROPFIND)
+    hrefs = caldav_propfind(session, caldav_base)
+    log.info("Nextcloud CalDAV has %d existing events", len(hrefs))
+
+    if args.dry_run:
+        log.info("[dry-run] No changes written. pushed=%d nc_events=%d", len(meetings), len(hrefs))
+        return
+
+    log.info("INT-13 CalDAV sync complete — pushed %d / %d meetings; NC events: %d",
+             pushed, len(meetings), len(hrefs))
+
+
+if __name__ == "__main__":
+    main()

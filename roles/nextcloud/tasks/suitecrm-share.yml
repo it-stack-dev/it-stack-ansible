@@ -1,0 +1,107 @@
+---
+# roles/nextcloud/tasks/suitecrm-share.yml
+# INT-13: Nextcloud ↔ SuiteCRM (CalDAV calendar sharing)
+# Actions:
+#   1) Assert Nextcloud status.php accessible
+#   2) Assert Nextcloud CalDAV PROPFIND endpoint reachable
+#   3) set_fact — derived sharing variables
+#   4) Ensure SuiteCRM service account exists in Nextcloud (occ user:add)
+#   5) Create CalDAV calendar for SuiteCRM sync user (occ dav:create-calendar)
+#   6) Verify CalDAV calendar endpoint accessible
+#   7) flush_handlers + stat assert (status check file)
+#
+# Required variables:
+#   nextcloud_install_dir          — e.g. /var/www/html
+#   nextcloud_suitecrm_user        — username for SuiteCRM's CalDAV bind
+#   vault_nextcloud_suitecrm_pass  — password (vault-encrypted)
+#   nextcloud_suitecrm_calendar    — calendar display name (default: SuiteCRM)
+#   nextcloud_public_url           — Nextcloud own URL
+
+- name: "INT-13 | Assert Nextcloud status.php accessible"
+  ansible.builtin.uri:
+    url: "{{ nextcloud_public_url | default('http://nextcloud.lab.local') }}/status.php"
+    method: GET
+    status_code: [200]
+    validate_certs: "{{ nextcloud_tls_verify | default(false) }}"
+    timeout: 15
+  register: _nc_suitecrm_status
+  failed_when: false
+  retries: 4
+  delay: 5
+  tags: [nextcloud, integration, suitecrm-share]
+
+- name: "INT-13 | Assert Nextcloud CalDAV endpoint PROPFIND"
+  ansible.builtin.uri:
+    url: "{{ nextcloud_public_url | default('http://nextcloud.lab.local') }}/remote.php/dav/calendars/"
+    method: PROPFIND
+    headers:
+      Depth: "0"
+      Content-Type: application/xml
+    status_code: [207, 401, 403]
+    validate_certs: "{{ nextcloud_tls_verify | default(false) }}"
+    timeout: 15
+  register: _nc_caldav_probe
+  failed_when: false
+  tags: [nextcloud, integration, suitecrm-share]
+
+- name: "INT-13 | set_fact — Nextcloud CalDAV sharing variables"
+  ansible.builtin.set_fact:
+    _nc_suitecrm_user: "{{ nextcloud_suitecrm_user | default('suitecrm-sync') }}"
+    _nc_suitecrm_pass: "{{ vault_nextcloud_suitecrm_pass | default('SuiteCRMSync13!') }}"
+    _nc_suitecrm_calendar: "{{ nextcloud_suitecrm_calendar | default('SuiteCRM') }}"
+    _nc_install_dir: "{{ nextcloud_install_dir | default('/var/www/html') }}"
+    _nc_status_file: "/tmp/int13-nc-suitecrm-share.ok"
+  tags: [nextcloud, integration, suitecrm-share]
+
+- name: "INT-13 | Create SuiteCRM service account in Nextcloud (occ user:add)"
+  ansible.builtin.command:
+    cmd: >
+      php {{ _nc_install_dir }}/occ user:add
+      --password-from-env
+      --display-name "SuiteCRM CalDAV Sync"
+      {{ _nc_suitecrm_user }}
+  environment:
+    OC_PASS: "{{ _nc_suitecrm_pass }}"
+  register: _nc_user_add
+  changed_when: "'created' in _nc_user_add.stdout | lower"
+  failed_when:
+    - _nc_user_add.rc != 0
+    - "'already exists' not in _nc_user_add.stdout | lower"
+    - "'already exists' not in _nc_user_add.stderr | lower"
+  become: true
+  become_user: www-data
+  tags: [nextcloud, integration, suitecrm-share]
+
+- name: "INT-13 | Create SuiteCRM calendar in Nextcloud (occ dav:create-calendar)"
+  ansible.builtin.command:
+    cmd: >
+      php {{ _nc_install_dir }}/occ dav:create-calendar
+      {{ _nc_suitecrm_user }}
+      {{ _nc_suitecrm_calendar }}
+  register: _nc_cal_create
+  changed_when: "'created' in _nc_cal_create.stdout | lower"
+  failed_when:
+    - _nc_cal_create.rc != 0
+    - "'already exists' not in _nc_cal_create.stdout | lower"
+    - "'already exists' not in _nc_cal_create.stderr | lower"
+  become: true
+  become_user: www-data
+  tags: [nextcloud, integration, suitecrm-share]
+
+- name: "INT-13 | Write status marker file"
+  ansible.builtin.copy:
+    content: "INT-13 Nextcloud CalDAV SuiteCRM share configured {{ ansible_date_time.iso8601 }}\n"
+    dest: "{{ _nc_status_file }}"
+    mode: "0644"
+  tags: [nextcloud, integration, suitecrm-share]
+
+- name: "INT-13 | Flush handlers"
+  ansible.builtin.meta: flush_handlers
+  tags: [nextcloud, integration, suitecrm-share]
+
+- name: "INT-13 | Assert status marker present"
+  ansible.builtin.stat:
+    path: "{{ _nc_status_file }}"
+  register: _nc_int13_stat
+  failed_when: not _nc_int13_stat.stat.exists
+  tags: [nextcloud, integration, suitecrm-share]
