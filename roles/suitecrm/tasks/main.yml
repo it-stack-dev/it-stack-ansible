@@ -18,3 +18,8 @@
   ansible.builtin.import_tasks: freepbx-cti.yml
   tags: [suitecrm, integration, freepbx-cti]
   when: suitecrm_enable_freepbx_cti | default(true) | bool
+
+- name: "INT-12: Import Odoo customer sync tasks"
+  ansible.builtin.import_tasks: odoo-sync.yml
+  tags: [suitecrm, integration, odoo-sync]
+  when: suitecrm_enable_odoo_sync | default(true) | bool

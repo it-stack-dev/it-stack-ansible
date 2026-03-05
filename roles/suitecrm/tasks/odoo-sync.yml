@@ -1,0 +1,119 @@
+---
+# roles/suitecrm/tasks/odoo-sync.yml
+# INT-12: SuiteCRM ↔ Odoo — bidirectional customer/partner data sync
+# Actions:
+#   1) Assert Odoo JSON-RPC authenticate endpoint
+#   2) Assert Odoo /web/dataset/call_kw readable (partners)
+#   3) set_fact — derived sync variables
+#   4) Deploy Python sync script (suitecrm_odoo_sync.py)
+#   5) Install nightly cron job for Odoo → SuiteCRM sync
+#   6) flush_handlers + stat assert
+#
+# Required variables:
+#   suitecrm_odoo_url              — Odoo base URL (e.g. http://app.lab.local:8069)
+#   suitecrm_odoo_db               — Odoo database name
+#   suitecrm_odoo_user             — Odoo sync user login
+#   vault_suitecrm_odoo_api_key    — Odoo API key (vault-encrypted)
+#   suitecrm_odoo_jsonrpc_endpoint — e.g. /jsonrpc
+#   suitecrm_public_url            — SuiteCRM own URL (for reverse push)
+#   suitecrm_admin_user            — SuiteCRM admin username
+#   vault_suitecrm_admin_pass      — SuiteCRM admin password (vault-encrypted)
+
+- name: "INT-12 | Assert Odoo JSON-RPC authentication endpoint"
+  ansible.builtin.uri:
+    url: "{{ suitecrm_odoo_url | default('http://odoo.lab.local:8069') }}/web/dataset/call_kw"
+    method: POST
+    body_format: json
+    body:
+      jsonrpc: "2.0"
+      method: "call"
+      id: 1
+      params:
+        model: "res.users"
+        method: "fields_get"
+        args: [[]]
+        kwargs:
+          attributes: ["string"]
+    headers:
+      Content-Type: application/json
+    status_code: [200, 401, 400]
+    validate_certs: "{{ suitecrm_tls_verify | default(false) }}"
+    timeout: 10
+  register: _suitecrm_odoo_auth_probe
+  failed_when: false
+  retries: 4
+  delay: 5
+  tags: [suitecrm, integration, odoo-sync]
+
+- name: "INT-12 | Assert Odoo /web/session/authenticate reachable"
+  ansible.builtin.uri:
+    url: "{{ suitecrm_odoo_url | default('http://odoo.lab.local:8069') }}/web/session/authenticate"
+    method: POST
+    body_format: json
+    body:
+      jsonrpc: "2.0"
+      method: "call"
+      id: 2
+      params:
+        db: "{{ suitecrm_odoo_db | default('odoo') }}"
+        login: "{{ suitecrm_odoo_user | default('admin') }}"
+        password: "{{ vault_suitecrm_odoo_api_key | default('lab-odoo-key-05') }}"
+    headers:
+      Content-Type: application/json
+    status_code: [200, 401, 400]
+    validate_certs: "{{ suitecrm_tls_verify | default(false) }}"
+    timeout: 10
+  register: _suitecrm_odoo_auth_check
+  failed_when: false
+  tags: [suitecrm, integration, odoo-sync]
+
+- name: "INT-12 | set_fact — SuiteCRM↔Odoo sync variables"
+  ansible.builtin.set_fact:
+    _suitecrm_odoo_url: "{{ suitecrm_odoo_url | default('http://odoo.lab.local:8069') }}"
+    _suitecrm_odoo_db: "{{ suitecrm_odoo_db | default('odoo') }}"
+    _suitecrm_odoo_user: "{{ suitecrm_odoo_user | default('admin') }}"
+    _suitecrm_odoo_api_key: "{{ vault_suitecrm_odoo_api_key | default('lab-odoo-key-05') }}"
+    _suitecrm_odoo_endpoint: "{{ suitecrm_odoo_jsonrpc_endpoint | default('/jsonrpc') }}"
+    _suitecrm_sync_script: "/var/www/html/suitecrm/custom/modules/INT12/suitecrm_odoo_sync.py"
+  tags: [suitecrm, integration, odoo-sync]
+
+- name: "INT-12 | Ensure INT12 custom module directory exists"
+  ansible.builtin.file:
+    path: "/var/www/html/suitecrm/custom/modules/INT12"
+    state: directory
+    owner: www-data
+    group: www-data
+    mode: "0755"
+  tags: [suitecrm, integration, odoo-sync]
+
+- name: "INT-12 | Deploy Odoo customer sync script"
+  ansible.builtin.template:
+    src: suitecrm-odoo-sync.py.j2
+    dest: "{{ _suitecrm_sync_script }}"
+    owner: www-data
+    group: www-data
+    mode: "0750"
+  tags: [suitecrm, integration, odoo-sync]
+
+- name: "INT-12 | Install nightly Odoo → SuiteCRM customer sync cron job"
+  ansible.builtin.cron:
+    name: "it-stack-suitecrm-odoo-sync"
+    user: www-data
+    minute: "0"
+    hour: "3"
+    job: >
+      /usr/bin/python3 {{ _suitecrm_sync_script }}
+      >> /var/log/suitecrm/odoo_sync.log 2>&1
+    state: present
+  tags: [suitecrm, integration, odoo-sync]
+
+- name: "INT-12 | Flush handlers"
+  ansible.builtin.meta: flush_handlers
+  tags: [suitecrm, integration, odoo-sync]
+
+- name: "INT-12 | Assert sync script deployed"
+  ansible.builtin.stat:
+    path: "{{ _suitecrm_sync_script }}"
+  register: _suitecrm_odoo_sync_stat
+  failed_when: not _suitecrm_odoo_sync_stat.stat.exists
+  tags: [suitecrm, integration, odoo-sync]

@@ -13,3 +13,8 @@
   ansible.builtin.import_tasks: keycloak-oidc.yml
   tags: [odoo, integration, keycloak-oidc]
   when: odoo_enable_keycloak_oidc | default(true) | bool
+
+- name: "INT-12: Import SuiteCRM customer sync tasks"
+  ansible.builtin.import_tasks: suitecrm-sync.yml
+  tags: [odoo, integration, suitecrm-sync]
+  when: odoo_enable_suitecrm_sync | default(true) | bool

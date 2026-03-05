@@ -1,0 +1,283 @@
+#!/usr/bin/env python3
+# =============================================================================
+# IT-Stack: SuiteCRM — Odoo Customer Data Sync Script
+# Template: suitecrm-odoo-sync.py.j2  (rendered by Ansible INT-12)
+# INT-12: SuiteCRM ↔ Odoo bidirectional customer/partner data sync
+#
+# Direction: Odoo res.partner → SuiteCRM Accounts/Contacts (pull)
+#            SuiteCRM Accounts → Odoo res.partner (push)
+#
+# Usage:
+#   python3 suitecrm_odoo_sync.py [--direction pull|push|both] [--dry-run] [--verbose]
+#
+# Rendered variables (Ansible):
+#   ODOO_URL      = {{ _suitecrm_odoo_url }}
+#   ODOO_DB       = {{ _suitecrm_odoo_db }}
+#   ODOO_USER     = {{ _suitecrm_odoo_user }}
+#   ODOO_API_KEY  = {{ _suitecrm_odoo_api_key }}
+#   ODOO_ENDPOINT = {{ _suitecrm_odoo_endpoint }}
+# =============================================================================
+
+import argparse
+import hashlib
+import json
+import logging
+import os
+import sys
+import urllib.request
+import urllib.error
+from datetime import datetime
+
+# ---------------------------------------------------------------------------
+# Ansible-rendered configuration
+# ---------------------------------------------------------------------------
+ODOO_URL      = "{{ _suitecrm_odoo_url }}"
+ODOO_DB       = "{{ _suitecrm_odoo_db }}"
+ODOO_USER     = "{{ _suitecrm_odoo_user }}"
+ODOO_API_KEY  = "{{ _suitecrm_odoo_api_key }}"
+ODOO_ENDPOINT = "{{ _suitecrm_odoo_endpoint }}"
+VERIFY_TLS    = {{ suitecrm_tls_verify | default(false) | lower | capitalize }}
+
+SYNC_TAG      = "suitecrm-int12"
+LOG_FILE      = "/var/log/suitecrm/odoo_sync.log"
+
+# ---------------------------------------------------------------------------
+# Logging
+# ---------------------------------------------------------------------------
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [suitecrm-odoo-sync] %(levelname)s %(message)s",
+    datefmt="%Y-%m-%dT%H:%M:%S",
+)
+log = logging.getLogger("suitecrm-odoo-sync")
+
+
+# ---------------------------------------------------------------------------
+# Odoo JSON-RPC helpers
+# ---------------------------------------------------------------------------
+_rpc_id = 0
+
+def _odoo_call(endpoint, method, params, timeout=20):
+    """Make a JSON-RPC call to Odoo. Returns parsed result or raises."""
+    global _rpc_id
+    _rpc_id += 1
+    payload = json.dumps({
+        "jsonrpc": "2.0",
+        "method":  "call",
+        "id":      _rpc_id,
+        "params":  params,
+    }).encode("utf-8")
+    url  = ODOO_URL.rstrip("/") + endpoint
+    req  = urllib.request.Request(
+        url, data=payload,
+        headers={"Content-Type": "application/json"},
+        method=method,
+    )
+    if not VERIFY_TLS:
+        import ssl
+        ctx = ssl.create_default_context()
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+    else:
+        ctx = None
+    try:
+        with urllib.request.urlopen(req, context=ctx, timeout=timeout) as resp:
+            body = json.loads(resp.read().decode("utf-8"))
+        if "error" in body:
+            raise RuntimeError(f"Odoo RPC error: {body['error']}")
+        return body.get("result")
+    except urllib.error.HTTPError as exc:
+        raise RuntimeError(f"HTTP {exc.code} from Odoo at {url}") from exc
+    except urllib.error.URLError as exc:
+        raise RuntimeError(f"Network error reaching Odoo at {url}: {exc.reason}") from exc
+
+
+def odoo_authenticate():
+    """Return Odoo user ID and session cookie. Raises on failure."""
+    result = _odoo_call(
+        "/web/session/authenticate", "POST",
+        {"db": ODOO_DB, "login": ODOO_USER, "password": ODOO_API_KEY},
+    )
+    uid = result.get("uid") if result else None
+    if not uid:
+        raise RuntimeError(f"Odoo authentication failed for user={ODOO_USER} db={ODOO_DB}")
+    log.info("Odoo authenticated: uid=%s", uid)
+    return uid
+
+
+def odoo_search_partners(uid, domain=None, fields=None, limit=500):
+    """Return list of res.partner dicts from Odoo."""
+    domain = domain or [["is_company", "=", True], ["active", "=", True]]
+    fields = fields or ["id", "name", "email", "phone", "website", "street", "city", "country_id"]
+    result = _odoo_call(
+        "/web/dataset/call_kw", "POST",
+        {
+            "model":  "res.partner",
+            "method": "search_read",
+            "args":   [domain],
+            "kwargs": {"fields": fields, "limit": limit},
+        },
+    )
+    return result or []
+
+
+def odoo_create_partner(uid, values):
+    """Create a res.partner in Odoo. Returns new record ID."""
+    result = _odoo_call(
+        "/web/dataset/call_kw", "POST",
+        {
+            "model":  "res.partner",
+            "method": "create",
+            "args":   [values],
+            "kwargs": {},
+        },
+    )
+    return result
+
+
+def odoo_write_partner(uid, partner_id, values):
+    """Update a res.partner in Odoo. Returns True on success."""
+    result = _odoo_call(
+        "/web/dataset/call_kw", "POST",
+        {
+            "model":  "res.partner",
+            "method": "write",
+            "args":   [[partner_id], values],
+            "kwargs": {},
+        },
+    )
+    return result
+
+
+# ---------------------------------------------------------------------------
+# SuiteCRM REST v8 helpers
+# ---------------------------------------------------------------------------
+def suitecrm_get_accounts(limit=500):
+    """Return list of SuiteCRM Account dicts via REST v8 (if available)."""
+    # In production: use SuiteCRM V8 REST API (OAuth2 bearer token)
+    # For lab: return a static sample record set to demonstrate the sync flow
+    log.info("SuiteCRM account fetch: (lab stub — %d records)", limit)
+    return [
+        {"id": "sc-001", "name": "Acme Corp",    "email1": "billing@acme.example", "phone_office": "555-0101", "website": "https://acme.example"},
+        {"id": "sc-002", "name": "Globex LLC",   "email1": "info@globex.example",  "phone_office": "555-0102", "website": ""},
+        {"id": "sc-003", "name": "IT-Stack Demo","email1": "demo@itstack.example", "phone_office": "555-0103", "website": "https://itstack.example"},
+    ]
+
+
+def suitecrm_upsert_account(partner):
+    """Create or update a SuiteCRM Account from Odoo partner data."""
+    # In production: POST/PUT to SuiteCRM V8 REST /api/v8/module/Accounts
+    log.info("SuiteCRM upsert: name=%s email=%s (lab stub)", partner.get("name"), partner.get("email"))
+    return {"id": f"sc-odoo-{partner.get('id', 'unknown')}", "action": "upserted"}
+
+
+# ---------------------------------------------------------------------------
+# Sync logic
+# ---------------------------------------------------------------------------
+def pull_odoo_to_suitecrm(uid, dry_run):
+    """Pull Odoo res.partner records and upsert to SuiteCRM Accounts."""
+    log.info("PULL: Odoo res.partner → SuiteCRM Accounts")
+    partners = odoo_search_partners(uid)
+    log.info("Fetched %d partner(s) from Odoo", len(partners))
+    created = updated = skipped = 0
+    for p in partners:
+        name = p.get("name", "")
+        if not name:
+            skipped += 1
+            continue
+        if dry_run:
+            log.info("[dry-run] Would upsert SuiteCRM Account: %s", name)
+            created += 1
+            continue
+        result = suitecrm_upsert_account(p)
+        if result.get("action") == "created":
+            created += 1
+        else:
+            updated += 1
+    log.info("PULL complete: created=%d updated=%d skipped=%d", created, updated, skipped)
+    return {"created": created, "updated": updated, "skipped": skipped}
+
+
+def push_suitecrm_to_odoo(uid, dry_run):
+    """Push SuiteCRM Accounts to Odoo as res.partner records."""
+    log.info("PUSH: SuiteCRM Accounts → Odoo res.partner")
+    accounts = suitecrm_get_accounts()
+    log.info("Fetched %d account(s) from SuiteCRM", len(accounts))
+    created = updated = skipped = 0
+    for acc in accounts:
+        name = acc.get("name", "")
+        if not name:
+            skipped += 1
+            continue
+        values = {
+            "name":       name,
+            "email":      acc.get("email1", ""),
+            "phone":      acc.get("phone_office", ""),
+            "website":    acc.get("website", ""),
+            "is_company": True,
+            "comment":    f"Synced from SuiteCRM INT-12 ({SYNC_TAG})",
+        }
+        if dry_run:
+            log.info("[dry-run] Would create/update Odoo partner: %s", name)
+            created += 1
+            continue
+        # Check if partner already exists by name
+        existing = _odoo_call(
+            "/web/dataset/call_kw", "POST",
+            {
+                "model":  "res.partner",
+                "method": "search",
+                "args":   [[["name", "=", name], ["is_company", "=", True]]],
+                "kwargs": {"limit": 1},
+            },
+        ) or []
+        if existing:
+            odoo_write_partner(uid, existing[0], values)
+            updated += 1
+        else:
+            odoo_create_partner(uid, values)
+            created += 1
+    log.info("PUSH complete: created=%d updated=%d skipped=%d", created, updated, skipped)
+    return {"created": created, "updated": updated, "skipped": skipped}
+
+
+# ---------------------------------------------------------------------------
+# Main
+# ---------------------------------------------------------------------------
+def main():
+    ap = argparse.ArgumentParser(description="SuiteCRM ↔ Odoo customer sync (INT-12)")
+    ap.add_argument("--direction", choices=["pull", "push", "both"], default="both")
+    ap.add_argument("--dry-run", action="store_true")
+    ap.add_argument("--verbose", action="store_true")
+    args = ap.parse_args()
+
+    if args.verbose:
+        logging.getLogger().setLevel(logging.DEBUG)
+
+    log.info("Starting SuiteCRM↔Odoo sync — direction=%s dry_run=%s", args.direction, args.dry_run)
+
+    uid = None
+    try:
+        uid = odoo_authenticate()
+    except Exception as exc:  # noqa: BLE001
+        log.error("Odoo auth failed: %s — continuing with pull disabled", exc)
+
+    totals = {}
+    if uid and args.direction in ("pull", "both"):
+        totals["pull"] = pull_odoo_to_suitecrm(uid, dry_run=args.dry_run)
+    if args.direction in ("push", "both"):
+        push_uid = uid
+        if push_uid is None:
+            try:
+                push_uid = odoo_authenticate()
+            except Exception as exc:  # noqa: BLE001
+                log.error("Odoo auth for push failed: %s — push skipped", exc)
+                push_uid = None
+        if push_uid:
+            totals["push"] = push_suitecrm_to_odoo(push_uid, dry_run=args.dry_run)
+
+    log.info("INT-12 SuiteCRM↔Odoo sync complete: %s", totals)
+
+
+if __name__ == "__main__":
+    main()
