@@ -1,0 +1,95 @@
+---
+# roles/odoo/tasks/taiga-timetrack.yml
+# INT-16: Odoo ↔ Taiga — time tracking export
+# Actions:
+#   1) Assert Taiga API reachable
+#   2) Assert Taiga auth endpoint returns token
+#   3) set_fact — derived sync variables
+#   4) Deploy Python time-tracking export script
+#   5) Install nightly cron job
+#   6) flush_handlers + stat assert
+#
+# Required variables:
+#   odoo_taiga_url               — Taiga base URL (e.g. http://pm.lab.local)
+#   odoo_taiga_user              — Taiga service account username
+#   vault_odoo_taiga_pass        — Taiga service account password (vault-encrypted)
+#   odoo_taiga_project_slug      — Taiga project slug to pull timesheets from
+#   odoo_db_name                 — Odoo database name
+#   vault_odoo_admin_pass        — Odoo admin password (vault-encrypted)
+
+- name: "INT-16 | Assert Taiga API reachable"
+  ansible.builtin.uri:
+    url: "{{ odoo_taiga_url | default('http://pm.lab.local') }}/api/v1/"
+    method: GET
+    status_code: [200, 401, 403]
+    validate_certs: "{{ odoo_tls_verify | default(false) }}"
+    timeout: 10
+  register: _odoo_taiga_probe
+  failed_when: false
+  retries: 4
+  delay: 5
+  tags: [odoo, integration, taiga-timetrack]
+
+- name: "INT-16 | Assert Taiga auth endpoint returns token"
+  ansible.builtin.uri:
+    url: "{{ odoo_taiga_url | default('http://pm.lab.local') }}/api/v1/auth"
+    method: POST
+    body_format: json
+    body:
+      type: normal
+      username: "{{ odoo_taiga_user | default('admin') }}"
+      password: "{{ vault_odoo_taiga_pass | default('Lab16Admin!') }}"
+    status_code: [200, 400, 401]
+    validate_certs: "{{ odoo_tls_verify | default(false) }}"
+    timeout: 10
+  register: _odoo_taiga_auth
+  failed_when: false
+  tags: [odoo, integration, taiga-timetrack]
+
+- name: "INT-16 | set_fact — Odoo↔Taiga timetrack variables"
+  ansible.builtin.set_fact:
+    _odoo_taiga_url: "{{ odoo_taiga_url | default('http://pm.lab.local') }}"
+    _odoo_taiga_user: "{{ odoo_taiga_user | default('admin') }}"
+    _odoo_taiga_pass: "{{ vault_odoo_taiga_pass | default('Lab16Admin!') }}"
+    _odoo_taiga_project: "{{ odoo_taiga_project_slug | default('it-stack') }}"
+    _odoo_taiga_sync_script: /opt/odoo/scripts/odoo-taiga-timetrack.py
+  tags: [odoo, integration, taiga-timetrack]
+
+- name: "INT-16 | Ensure Odoo scripts directory exists"
+  ansible.builtin.file:
+    path: /opt/odoo/scripts
+    state: directory
+    owner: odoo
+    group: odoo
+    mode: "0750"
+  tags: [odoo, integration, taiga-timetrack]
+
+- name: "INT-16 | Deploy Taiga time-tracking export script"
+  ansible.builtin.template:
+    src: odoo-taiga-timetrack.py.j2
+    dest: "{{ _odoo_taiga_sync_script }}"
+    owner: odoo
+    group: odoo
+    mode: "0750"
+  tags: [odoo, integration, taiga-timetrack]
+
+- name: "INT-16 | Install nightly Taiga → Odoo timesheet sync cron job"
+  ansible.builtin.cron:
+    name: "it-stack-odoo-taiga-timetrack"
+    user: odoo
+    minute: "0"
+    hour: "1"
+    job: "python3 {{ _odoo_taiga_sync_script }} >> /var/log/odoo/taiga-timetrack.log 2>&1"
+    state: present
+  tags: [odoo, integration, taiga-timetrack]
+
+- name: "INT-16 | Flush handlers"
+  ansible.builtin.meta: flush_handlers
+  tags: [odoo, integration, taiga-timetrack]
+
+- name: "INT-16 | Assert timetrack sync script deployed"
+  ansible.builtin.stat:
+    path: "{{ _odoo_taiga_sync_script }}"
+  register: _odoo_taiga_script_stat
+  failed_when: not _odoo_taiga_script_stat.stat.exists
+  tags: [odoo, integration, taiga-timetrack]

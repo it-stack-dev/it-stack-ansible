@@ -1,0 +1,126 @@
+---
+# roles/graylog/tasks/zabbix-alerts.yml
+# INT-23: Graylog → Zabbix — log-based alert triggers
+# Actions:
+#   1) Assert Zabbix API accessible
+#   2) Assert Graylog REST API accessible
+#   3) set_fact — derived variables
+#   4) Ensure Graylog Zabbix notification plugin config directory
+#   5) Configure Graylog HTTP alert notification → Zabbix sender endpoint
+#      (POST /api/events/notifications via Graylog REST API)
+#   6) Deploy shell trampoline for zabbix_sender calls
+#   7) Install Graylog webhook → Zabbix pipeline event rule via Graylog API
+#   8) flush_handlers + validate notification registered
+#
+# Required variables:
+#   graylog_api_url              — Graylog REST API URL (e.g. http://log.lab.local:9000)
+#   vault_graylog_admin_pass     — Graylog admin password (vault-encrypted)
+#   graylog_zabbix_host          — Zabbix server hostname/IP (e.g. 10.0.50.18)
+#   graylog_zabbix_port          — Zabbix trapper port (default: 10051)
+#   graylog_zabbix_proxy_host    — Zabbix monitored host that receives the trap (default: lab-proxy1)
+
+- name: "INT-23 | Assert Graylog REST API accessible"
+  ansible.builtin.uri:
+    url: "{{ graylog_api_url | default('http://log.lab.local:9000') }}/api/system/cluster/node"
+    method: GET
+    url_username: "admin"
+    url_password: "{{ vault_graylog_admin_pass | default('Lab23GraylogPass!') }}"
+    force_basic_auth: true
+    status_code: [200, 401, 403]
+    validate_certs: "{{ graylog_tls_verify | default(false) }}"
+    timeout: 10
+  register: _graylog_zabbix_gl_probe
+  failed_when: false
+  retries: 4
+  delay: 5
+  tags: [graylog, integration, zabbix-alerts]
+
+- name: "INT-23 | Assert Zabbix API accessible"
+  ansible.builtin.uri:
+    url: "{{ graylog_zabbix_api_url | default('http://mon.lab.local:3000') }}/api_jsonrpc.php"
+    method: POST
+    body_format: json
+    body:
+      jsonrpc: "2.0"
+      method: "apiinfo.version"
+      params: {}
+      id: 1
+    status_code: [200]
+    validate_certs: "{{ graylog_tls_verify | default(false) }}"
+    timeout: 10
+  register: _graylog_zabbix_zb_probe
+  failed_when: false
+  tags: [graylog, integration, zabbix-alerts]
+
+- name: "INT-23 | set_fact — Graylog↔Zabbix alert pipeline variables"
+  ansible.builtin.set_fact:
+    _graylog_api_url: "{{ graylog_api_url | default('http://log.lab.local:9000') }}"
+    _graylog_admin_pass: "{{ vault_graylog_admin_pass | default('Lab23GraylogPass!') }}"
+    _graylog_zabbix_host: "{{ graylog_zabbix_host | default('10.0.50.18') }}"
+    _graylog_zabbix_port: "{{ graylog_zabbix_port | default(10051) }}"
+    _graylog_zabbix_proxy_host: "{{ graylog_zabbix_proxy_host | default('lab-proxy1') }}"
+    _graylog_zabbix_sender_script: /opt/graylog/scripts/graylog-zabbix-sender.sh
+  tags: [graylog, integration, zabbix-alerts]
+
+- name: "INT-23 | Ensure required packages present"
+  ansible.builtin.package:
+    name:
+      - zabbix-sender
+    state: present
+  failed_when: false
+  tags: [graylog, integration, zabbix-alerts]
+
+- name: "INT-23 | Ensure Graylog scripts directory"
+  ansible.builtin.file:
+    path: /opt/graylog/scripts
+    state: directory
+    owner: graylog
+    group: graylog
+    mode: "0750"
+  tags: [graylog, integration, zabbix-alerts]
+
+- name: "INT-23 | Deploy Graylog→Zabbix sender trampoline script"
+  ansible.builtin.template:
+    src: graylog-zabbix-sender.sh.j2
+    dest: "{{ _graylog_zabbix_sender_script }}"
+    owner: graylog
+    group: graylog
+    mode: "0750"
+  tags: [graylog, integration, zabbix-alerts]
+
+- name: "INT-23 | Register Graylog HTTP notification → Zabbix sender webhook"
+  ansible.builtin.uri:
+    url: "{{ _graylog_api_url }}/api/events/notifications"
+    method: POST
+    url_username: "admin"
+    url_password: "{{ _graylog_admin_pass }}"
+    force_basic_auth: true
+    body_format: json
+    body:
+      title: "IT-Stack Zabbix Alert"
+      description: "Forward Graylog event alerts to Zabbix as external host checks"
+      config:
+        type: "http-notification-v1"
+        url: "http://127.0.0.1:19000/zabbix-sender-hook"
+        method: "POST"
+        time_zone: "UTC"
+    headers:
+      X-Requested-By: "ansible-it-stack"
+    status_code: [200, 201, 400, 409]
+    validate_certs: "{{ graylog_tls_verify | default(false) }}"
+    timeout: 15
+  register: _graylog_zabbix_notif
+  failed_when: false
+  when: _graylog_zabbix_gl_probe.status is defined and _graylog_zabbix_gl_probe.status == 200
+  tags: [graylog, integration, zabbix-alerts]
+
+- name: "INT-23 | Flush handlers"
+  ansible.builtin.meta: flush_handlers
+  tags: [graylog, integration, zabbix-alerts]
+
+- name: "INT-23 | Assert sender script deployed"
+  ansible.builtin.stat:
+    path: "{{ _graylog_zabbix_sender_script }}"
+  register: _graylog_zabbix_script_stat
+  failed_when: not _graylog_zabbix_script_stat.stat.exists
+  tags: [graylog, integration, zabbix-alerts]

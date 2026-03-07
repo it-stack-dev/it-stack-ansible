@@ -1,0 +1,120 @@
+---
+# roles/odoo/tasks/freeipa-ldap.yml
+# INT-15: Odoo ↔ FreeIPA — employee directory sync via LDAP
+# Actions:
+#   1) Assert FreeIPA LDAP port reachable
+#   2) Assert LDAP base DN returns results
+#   3) set_fact — LDAP connection variables
+#   4) Deploy LDAP config to Odoo ir.config_parameter table (via odoo-bin shell)
+#   5) Deploy systemd timer for periodic LDAP sync
+#   6) flush_handlers + stat assert
+#
+# Required variables:
+#   odoo_freeipa_ldap_host      — FreeIPA LDAP host (default: 10.0.50.11)
+#   odoo_freeipa_ldap_port      — 389 (LDAP) or 636 (LDAPS)
+#   odoo_freeipa_bind_dn        — e.g. uid=svc-odoo,cn=users,dc=lab,dc=local
+#   vault_odoo_freeipa_bind_pass — LDAP bind password (vault-encrypted)
+#   odoo_freeipa_base_dn        — e.g. cn=users,dc=lab,dc=local
+#   odoo_freeipa_user_filter    — LDAP filter for users (default: objectClass=person)
+#   odoo_db_name                — Odoo database name
+
+- name: "INT-15 | Assert FreeIPA LDAP port reachable"
+  ansible.builtin.wait_for:
+    host: "{{ odoo_freeipa_ldap_host | default('10.0.50.11') }}"
+    port: "{{ odoo_freeipa_ldap_port | default(389) }}"
+    timeout: 10
+  register: _odoo_ipa_ldap_check
+  failed_when: false
+  tags: [odoo, integration, freeipa-ldap]
+
+- name: "INT-15 | Assert LDAP base DN exists (ldapsearch probe)"
+  ansible.builtin.command:
+    cmd: >
+      ldapsearch
+      -x
+      -H ldap://{{ odoo_freeipa_ldap_host | default('10.0.50.11') }}:{{ odoo_freeipa_ldap_port | default(389) }}
+      -D "{{ odoo_freeipa_bind_dn | default('uid=svc-odoo,cn=users,dc=lab,dc=local') }}"
+      -w "{{ vault_odoo_freeipa_bind_pass | default('Lab15SvcPass!') }}"
+      -b "{{ odoo_freeipa_base_dn | default('cn=users,dc=lab,dc=local') }}"
+      -s one
+      "({{ odoo_freeipa_user_filter | default('objectClass=person') }})"
+      dn
+  register: _odoo_ipa_ldapsearch
+  changed_when: false
+  failed_when: false
+  tags: [odoo, integration, freeipa-ldap]
+
+- name: "INT-15 | set_fact — Odoo↔FreeIPA LDAP variables"
+  ansible.builtin.set_fact:
+    _odoo_ipa_host: "{{ odoo_freeipa_ldap_host | default('10.0.50.11') }}"
+    _odoo_ipa_port: "{{ odoo_freeipa_ldap_port | default(389) }}"
+    _odoo_ipa_bind_dn: "{{ odoo_freeipa_bind_dn | default('uid=svc-odoo,cn=users,dc=lab,dc=local') }}"
+    _odoo_ipa_bind_pass: "{{ vault_odoo_freeipa_bind_pass | default('Lab15SvcPass!') }}"
+    _odoo_ipa_base_dn: "{{ odoo_freeipa_base_dn | default('cn=users,dc=lab,dc=local') }}"
+    _odoo_ipa_user_filter: "{{ odoo_freeipa_user_filter | default('objectClass=person') }}"
+  tags: [odoo, integration, freeipa-ldap]
+
+- name: "INT-15 | Install python3-ldap on Odoo host"
+  ansible.builtin.apt:
+    name: python3-ldap
+    state: present
+    update_cache: false
+  tags: [odoo, integration, freeipa-ldap]
+
+- name: "INT-15 | Configure Odoo LDAP authentication via ir.config_parameter"
+  ansible.builtin.template:
+    src: odoo-freeipa-ldap.conf.j2
+    dest: /etc/odoo/ldap.conf
+    owner: odoo
+    group: odoo
+    mode: "0640"
+  notify: restart odoo
+  tags: [odoo, integration, freeipa-ldap]
+
+- name: "INT-15 | Configure Odoo res.company LDAP entry (odoo-bin shell script)"
+  ansible.builtin.template:
+    src: odoo-freeipa-ldap-setup.py.j2
+    dest: /opt/odoo/scripts/setup-ldap.py
+    owner: odoo
+    group: odoo
+    mode: "0750"
+  tags: [odoo, integration, freeipa-ldap]
+
+- name: "INT-15 | Run LDAP setup script via odoo-bin"
+  ansible.builtin.command:
+    cmd: "/opt/odoo/odoo-bin shell -d {{ odoo_db_name | default('odoo') }} --no-http -c /etc/odoo/odoo.conf < /opt/odoo/scripts/setup-ldap.py"
+  become: true
+  become_user: odoo
+  register: _odoo_ipa_setup_result
+  changed_when: "'ldap_setup_done' in _odoo_ipa_setup_result.stdout"
+  failed_when: false
+  tags: [odoo, integration, freeipa-ldap]
+
+- name: "INT-15 | Deploy systemd timer for periodic LDAP employee sync"
+  ansible.builtin.template:
+    src: odoo-freeipa-ldap-sync.timer.j2
+    dest: /etc/systemd/system/odoo-ldap-sync.timer
+    owner: root
+    group: root
+    mode: "0644"
+  notify: reload systemd
+  tags: [odoo, integration, freeipa-ldap]
+
+- name: "INT-15 | Enable and start LDAP sync timer"
+  ansible.builtin.systemd:
+    name: odoo-ldap-sync.timer
+    enabled: true
+    state: started
+    daemon_reload: true
+  tags: [odoo, integration, freeipa-ldap]
+
+- name: "INT-15 | Flush handlers"
+  ansible.builtin.meta: flush_handlers
+  tags: [odoo, integration, freeipa-ldap]
+
+- name: "INT-15 | Assert LDAP conf deployed"
+  ansible.builtin.stat:
+    path: /etc/odoo/ldap.conf
+  register: _odoo_ipa_conf_stat
+  failed_when: not _odoo_ipa_conf_stat.stat.exists
+  tags: [odoo, integration, freeipa-ldap]

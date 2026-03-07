@@ -1,0 +1,13 @@
+[Unit]
+Description=IT-Stack INT-15: Odoo FreeIPA LDAP daily sync
+Documentation=https://github.com/it-stack-dev/it-stack-odoo
+After=network-online.target odoo.service
+
+[Timer]
+OnCalendar=*-*-* 00:30:00
+RandomizedDelaySec=300
+Persistent=true
+Unit=odoo-freeipa-ldap-sync.service
+
+[Install]
+WantedBy=timers.target

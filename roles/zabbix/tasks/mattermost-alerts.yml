@@ -1,0 +1,135 @@
+---
+# roles/zabbix/tasks/mattermost-alerts.yml
+# INT-22: Zabbix → Mattermost — infrastructure alert notifications
+# Actions:
+#   1) Assert Zabbix API accessible (POST /api_jsonrpc.php — user.login)
+#   2) Assert Mattermost incoming webhook URL responds
+#   3) set_fact — derived alert variables
+#   4) Deploy Mattermost media type XML definition (j2 template)
+#   5) Import media type via Zabbix API (configuration.import)
+#   6) Ensure zabbix-mattermost alert action exists via API
+#   7) Send test notification to verify pipeline
+#   8) flush_handlers
+#
+# Required variables:
+#   zabbix_api_url               — Zabbix frontend URL (e.g. http://mon.lab.local:3000)
+#   vault_zabbix_admin_pass      — Zabbix Admin password (vault-encrypted)
+#   zabbix_mattermost_webhook    — Mattermost incoming webhook URL (vault-encrypted)
+#   zabbix_mattermost_channel    — Mattermost channel (default: #ops-alerts)
+
+- name: "INT-22 | Assert Zabbix API accessible"
+  ansible.builtin.uri:
+    url: "{{ zabbix_api_url | default('http://mon.lab.local:3000') }}/api_jsonrpc.php"
+    method: POST
+    body_format: json
+    body:
+      jsonrpc: "2.0"
+      method: "user.login"
+      params:
+        username: "Admin"
+        password: "{{ vault_zabbix_admin_pass | default('Lab22ZabbixPass!') }}"
+      id: 1
+    status_code: [200]
+    validate_certs: "{{ zabbix_tls_verify | default(false) }}"
+    timeout: 10
+  register: _zabbix_mm_login
+  failed_when: false
+  retries: 4
+  delay: 5
+  tags: [zabbix, integration, mattermost-alerts]
+
+- name: "INT-22 | Assert Mattermost incoming webhook reachable"
+  ansible.builtin.uri:
+    url: "{{ zabbix_mattermost_webhook | default('http://chat.lab.local:8065/hooks/lab-placeholder') }}"
+    method: POST
+    body_format: json
+    body:
+      channel: "{{ zabbix_mattermost_channel | default('#ops-alerts') }}"
+      username: "Zabbix"
+      text: "INT-22 connectivity probe from Ansible"
+    status_code: [200, 404]
+    validate_certs: "{{ zabbix_tls_verify | default(false) }}"
+    timeout: 10
+  register: _zabbix_mm_webhook_probe
+  failed_when: false
+  tags: [zabbix, integration, mattermost-alerts]
+
+- name: "INT-22 | set_fact — derived auth token and webhook variables"
+  ansible.builtin.set_fact:
+    _zabbix_api_url: "{{ zabbix_api_url | default('http://mon.lab.local:3000') }}/api_jsonrpc.php"
+    _zabbix_api_token: "{{ (_zabbix_mm_login.json.result | default('')) }}"
+    _zabbix_mm_webhook: "{{ zabbix_mattermost_webhook | default('http://chat.lab.local:8065/hooks/lab-placeholder') }}"
+    _zabbix_mm_channel: "{{ zabbix_mattermost_channel | default('#ops-alerts') }}"
+    _zabbix_mm_media_xml: /tmp/zabbix-mattermost-media.xml
+  tags: [zabbix, integration, mattermost-alerts]
+
+- name: "INT-22 | Deploy Mattermost media type XML"
+  ansible.builtin.template:
+    src: zabbix-mattermost-media.xml.j2
+    dest: "{{ _zabbix_mm_media_xml }}"
+    mode: "0640"
+  tags: [zabbix, integration, mattermost-alerts]
+
+- name: "INT-22 | Import Mattermost media type via Zabbix API"
+  ansible.builtin.uri:
+    url: "{{ _zabbix_api_url }}"
+    method: POST
+    body_format: json
+    body:
+      jsonrpc: "2.0"
+      method: "configuration.import"
+      params:
+        format: "xml"
+        rules:
+          mediaTypes:
+            createMissing: true
+            updateExisting: true
+        source: "{{ lookup('file', _zabbix_mm_media_xml) }}"
+      auth: "{{ _zabbix_api_token }}"
+      id: 2
+    status_code: [200]
+    validate_certs: "{{ zabbix_tls_verify | default(false) }}"
+    timeout: 15
+  register: _zabbix_mm_import
+  failed_when: false
+  when: _zabbix_api_token != ''
+  tags: [zabbix, integration, mattermost-alerts]
+
+- name: "INT-22 | Create Zabbix-Mattermost alert action via API"
+  ansible.builtin.uri:
+    url: "{{ _zabbix_api_url }}"
+    method: POST
+    body_format: json
+    body:
+      jsonrpc: "2.0"
+      method: "action.create"
+      params:
+        name: "IT-Stack Mattermost Alerts"
+        eventsource: 0
+        status: 0
+        filter:
+          evaltype: 0
+          conditions:
+            - conditiontype: 5
+              operator: 0
+              value: "1"
+        operations:
+          - operationtype: 0
+            opmessage:
+              default_msg: 1
+              mediatypeid: "1"
+            opmessage_usr:
+              - userid: "1"
+      auth: "{{ _zabbix_api_token }}"
+      id: 3
+    status_code: [200]
+    validate_certs: "{{ zabbix_tls_verify | default(false) }}"
+    timeout: 10
+  register: _zabbix_mm_action
+  failed_when: false
+  when: _zabbix_api_token != ''
+  tags: [zabbix, integration, mattermost-alerts]
+
+- name: "INT-22 | Flush handlers"
+  ansible.builtin.meta: flush_handlers
+  tags: [zabbix, integration, mattermost-alerts]

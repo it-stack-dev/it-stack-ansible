@@ -1,0 +1,197 @@
+---
+# playbooks/site-4node.yml
+# IT-Stack — Four Node Deployment
+#
+# Tier:        2 — Department
+# Computers:   4
+# Node 1 RAM:  16 GB  (Identity + Proxy)
+# Node 2 RAM:  32 GB  (Database — Elasticsearch needs headroom)
+# Node 3 RAM:  24 GB  (Collaboration + Communications + VoIP)
+# Node 4 RAM:  24 GB  (Business + IT Management + Monitoring)
+#
+# Layout:
+#   lab-node1 (192.168.1.10): FreeIPA · Keycloak · Traefik
+#   lab-node2 (192.168.1.11): PostgreSQL · Redis · Elasticsearch
+#   lab-node3 (192.168.1.12): Nextcloud · Mattermost · Jitsi · iRedMail · FreePBX · Zammad
+#   lab-node4 (192.168.1.13): SuiteCRM · Odoo · OpenKM · Taiga · Snipe-IT · GLPI · Zabbix · Graylog
+#
+# Usage:
+#   ansible-playbook -i inventory/hosts-4node.ini playbooks/site-4node.yml \
+#     --vault-password-file .vault_pass -e "ansible_user=ubuntu"
+# ─────────────────────────────────────────────────────────────────────────────
+
+- name: "0 — Base OS hardening (all nodes)"
+  hosts: all_servers
+  gather_facts: true
+  vars_files: [../vault/secrets.yml]
+  roles:
+    - role: common
+      tags: [always, common]
+
+# ══ NODE 1: IDENTITY + PROXY ══════════════════════════════════════════════════
+
+- name: "1a — FreeIPA (node1)"
+  hosts: identity
+  gather_facts: true
+  vars_files: [../vault/secrets.yml]
+  roles:
+    - role: freeipa
+      tags: [node1, identity, freeipa]
+
+- name: "1b — Keycloak SSO (node1)"
+  hosts: identity
+  gather_facts: true
+  vars_files: [../vault/secrets.yml]
+  roles:
+    - role: keycloak
+      tags: [node1, identity, keycloak]
+
+- name: "1c — Traefik (node1)"
+  hosts: infrastructure
+  gather_facts: true
+  vars_files: [../vault/secrets.yml]
+  roles:
+    - role: traefik
+      tags: [node1, infrastructure, traefik]
+
+# ══ NODE 2: DATABASE ══════════════════════════════════════════════════════════
+
+- name: "2a — PostgreSQL (node2)"
+  hosts: database
+  gather_facts: true
+  vars_files: [../vault/secrets.yml]
+  roles:
+    - role: postgresql
+      tags: [node2, database, postgresql]
+
+- name: "2b — Redis (node2)"
+  hosts: database
+  gather_facts: true
+  vars_files: [../vault/secrets.yml]
+  roles:
+    - role: redis
+      tags: [node2, database, redis]
+
+- name: "2c — Elasticsearch (node2)"
+  hosts: database
+  gather_facts: true
+  vars_files: [../vault/secrets.yml]
+  roles:
+    - role: elasticsearch
+      tags: [node2, database, elasticsearch]
+
+# ══ NODE 3: COLLABORATION + COMMUNICATIONS ════════════════════════════════════
+
+- name: "3a — Nextcloud (node3)"
+  hosts: collaboration
+  gather_facts: true
+  vars_files: [../vault/secrets.yml]
+  roles:
+    - role: nextcloud
+      tags: [node3, collaboration, nextcloud]
+
+- name: "3b — Mattermost (node3)"
+  hosts: collaboration
+  gather_facts: true
+  vars_files: [../vault/secrets.yml]
+  roles:
+    - role: mattermost
+      tags: [node3, collaboration, mattermost]
+
+- name: "3c — Jitsi Meet (node3)"
+  hosts: collaboration
+  gather_facts: true
+  vars_files: [../vault/secrets.yml]
+  roles:
+    - role: jitsi
+      tags: [node3, collaboration, jitsi]
+
+- name: "3d — iRedMail (node3)"
+  hosts: communications
+  gather_facts: true
+  vars_files: [../vault/secrets.yml]
+  roles:
+    - role: iredmail
+      tags: [node3, communications, iredmail]
+
+- name: "3e — Zammad (node3)"
+  hosts: communications
+  gather_facts: true
+  vars_files: [../vault/secrets.yml]
+  roles:
+    - role: zammad
+      tags: [node3, communications, zammad]
+
+- name: "3f — FreePBX / Asterisk (node3)"
+  hosts: voip
+  gather_facts: true
+  vars_files: [../vault/secrets.yml]
+  roles:
+    - role: freepbx
+      tags: [node3, communications, freepbx]
+
+# ══ NODE 4: BUSINESS + IT MANAGEMENT + MONITORING ════════════════════════════
+
+- name: "4a — SuiteCRM (node4)"
+  hosts: business
+  gather_facts: true
+  vars_files: [../vault/secrets.yml]
+  roles:
+    - role: suitecrm
+      tags: [node4, business, suitecrm]
+
+- name: "4b — Odoo ERP (node4)"
+  hosts: business
+  gather_facts: true
+  vars_files: [../vault/secrets.yml]
+  roles:
+    - role: odoo
+      tags: [node4, business, odoo]
+
+- name: "4c — OpenKM (node4)"
+  hosts: business
+  gather_facts: true
+  vars_files: [../vault/secrets.yml]
+  roles:
+    - role: openkm
+      tags: [node4, business, openkm]
+
+- name: "4d — Taiga (node4)"
+  hosts: it_management
+  gather_facts: true
+  vars_files: [../vault/secrets.yml]
+  roles:
+    - role: taiga
+      tags: [node4, it_management, taiga]
+
+- name: "4e — Snipe-IT (node4)"
+  hosts: it_management
+  gather_facts: true
+  vars_files: [../vault/secrets.yml]
+  roles:
+    - role: snipeit
+      tags: [node4, it_management, snipeit]
+
+- name: "4f — GLPI (node4)"
+  hosts: it_management
+  gather_facts: true
+  vars_files: [../vault/secrets.yml]
+  roles:
+    - role: glpi
+      tags: [node4, it_management, glpi]
+
+- name: "4g — Zabbix monitoring (node4)"
+  hosts: monitoring
+  gather_facts: true
+  vars_files: [../vault/secrets.yml]
+  roles:
+    - role: zabbix
+      tags: [node4, monitoring, zabbix]
+
+- name: "4h — Graylog log management (node4)"
+  hosts: monitoring
+  gather_facts: true
+  vars_files: [../vault/secrets.yml]
+  roles:
+    - role: graylog
+      tags: [node4, monitoring, graylog]

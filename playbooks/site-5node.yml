@@ -1,0 +1,210 @@
+---
+# playbooks/site-5node.yml
+# IT-Stack — Five Node Deployment (Near-Production)
+#
+# Tier:        2 — Department / Near-Production Lab
+# Computers:   5
+# Node 1 RAM:  16 GB  (Identity + Proxy)
+# Node 2 RAM:  32 GB  (Database)
+# Node 3 RAM:  24 GB  (Collaboration + Communications apps)
+# Node 4 RAM:  16 GB  (VoIP + Business systems)
+# Node 5 RAM:  16 GB  (IT Management + Monitoring)
+#
+# Layout:
+#   lab-node1 (192.168.1.10): FreeIPA · Keycloak · Traefik
+#   lab-node2 (192.168.1.11): PostgreSQL · Redis · Elasticsearch
+#   lab-node3 (192.168.1.12): Nextcloud · Mattermost · Jitsi · iRedMail · Zammad
+#   lab-node4 (192.168.1.13): FreePBX · SuiteCRM · Odoo · OpenKM
+#   lab-node5 (192.168.1.14): Taiga · Snipe-IT · GLPI · Zabbix · Graylog
+#
+# This is the recommended minimum for testing cross-service integrations
+# realistically. The jump from 5-node to 8-node (production) is primarily
+# about giving each service category its own dedicated host.
+#
+# Usage:
+#   ansible-playbook -i inventory/hosts-5node.ini playbooks/site-5node.yml \
+#     --vault-password-file .vault_pass -e "ansible_user=ubuntu"
+#
+# Deploy one node at a time:
+#   ansible-playbook ... --limit lab-node1  # foundation first
+#   ansible-playbook ... --limit lab-node2  # then database
+#   ansible-playbook ... --limit lab-node3  # then apps
+# ─────────────────────────────────────────────────────────────────────────────
+
+- name: "0 — Base OS hardening (all nodes)"
+  hosts: all_servers
+  gather_facts: true
+  vars_files: [../vault/secrets.yml]
+  roles:
+    - role: common
+      tags: [always, common]
+
+# ══ NODE 1: IDENTITY + PROXY ══════════════════════════════════════════════════
+
+- name: "1a — FreeIPA (node1)"
+  hosts: identity
+  gather_facts: true
+  vars_files: [../vault/secrets.yml]
+  roles:
+    - role: freeipa
+      tags: [node1, identity, freeipa]
+
+- name: "1b — Keycloak SSO (node1)"
+  hosts: identity
+  gather_facts: true
+  vars_files: [../vault/secrets.yml]
+  roles:
+    - role: keycloak
+      tags: [node1, identity, keycloak]
+
+- name: "1c — Traefik reverse proxy (node1)"
+  hosts: infrastructure
+  gather_facts: true
+  vars_files: [../vault/secrets.yml]
+  roles:
+    - role: traefik
+      tags: [node1, infrastructure, traefik]
+
+# ══ NODE 2: DATABASE ══════════════════════════════════════════════════════════
+
+- name: "2a — PostgreSQL (node2)"
+  hosts: database
+  gather_facts: true
+  vars_files: [../vault/secrets.yml]
+  roles:
+    - role: postgresql
+      tags: [node2, database, postgresql]
+
+- name: "2b — Redis (node2)"
+  hosts: database
+  gather_facts: true
+  vars_files: [../vault/secrets.yml]
+  roles:
+    - role: redis
+      tags: [node2, database, redis]
+
+- name: "2c — Elasticsearch (node2)"
+  hosts: database
+  gather_facts: true
+  vars_files: [../vault/secrets.yml]
+  roles:
+    - role: elasticsearch
+      tags: [node2, database, elasticsearch]
+
+# ══ NODE 3: COLLABORATION + COMMS ════════════════════════════════════════════
+
+- name: "3a — Nextcloud (node3)"
+  hosts: collaboration
+  gather_facts: true
+  vars_files: [../vault/secrets.yml]
+  roles:
+    - role: nextcloud
+      tags: [node3, collaboration, nextcloud]
+
+- name: "3b — Mattermost (node3)"
+  hosts: collaboration
+  gather_facts: true
+  vars_files: [../vault/secrets.yml]
+  roles:
+    - role: mattermost
+      tags: [node3, collaboration, mattermost]
+
+- name: "3c — Jitsi Meet (node3)"
+  hosts: collaboration
+  gather_facts: true
+  vars_files: [../vault/secrets.yml]
+  roles:
+    - role: jitsi
+      tags: [node3, collaboration, jitsi]
+
+- name: "3d — iRedMail (node3)"
+  hosts: communications
+  gather_facts: true
+  vars_files: [../vault/secrets.yml]
+  roles:
+    - role: iredmail
+      tags: [node3, communications, iredmail]
+
+- name: "3e — Zammad help desk (node3)"
+  hosts: communications
+  gather_facts: true
+  vars_files: [../vault/secrets.yml]
+  roles:
+    - role: zammad
+      tags: [node3, communications, zammad]
+
+# ══ NODE 4: VOIP + BUSINESS ═══════════════════════════════════════════════════
+
+- name: "4a — FreePBX / Asterisk (node4)"
+  hosts: voip
+  gather_facts: true
+  vars_files: [../vault/secrets.yml]
+  roles:
+    - role: freepbx
+      tags: [node4, communications, freepbx]
+
+- name: "4b — SuiteCRM (node4)"
+  hosts: business
+  gather_facts: true
+  vars_files: [../vault/secrets.yml]
+  roles:
+    - role: suitecrm
+      tags: [node4, business, suitecrm]
+
+- name: "4c — Odoo ERP (node4)"
+  hosts: business
+  gather_facts: true
+  vars_files: [../vault/secrets.yml]
+  roles:
+    - role: odoo
+      tags: [node4, business, odoo]
+
+- name: "4d — OpenKM document management (node4)"
+  hosts: business
+  gather_facts: true
+  vars_files: [../vault/secrets.yml]
+  roles:
+    - role: openkm
+      tags: [node4, business, openkm]
+
+# ══ NODE 5: IT MANAGEMENT + MONITORING ═══════════════════════════════════════
+
+- name: "5a — Taiga project management (node5)"
+  hosts: it_management
+  gather_facts: true
+  vars_files: [../vault/secrets.yml]
+  roles:
+    - role: taiga
+      tags: [node5, it_management, taiga]
+
+- name: "5b — Snipe-IT asset management (node5)"
+  hosts: it_management
+  gather_facts: true
+  vars_files: [../vault/secrets.yml]
+  roles:
+    - role: snipeit
+      tags: [node5, it_management, snipeit]
+
+- name: "5c — GLPI ITSM (node5)"
+  hosts: it_management
+  gather_facts: true
+  vars_files: [../vault/secrets.yml]
+  roles:
+    - role: glpi
+      tags: [node5, it_management, glpi]
+
+- name: "5d — Zabbix monitoring (node5)"
+  hosts: monitoring
+  gather_facts: true
+  vars_files: [../vault/secrets.yml]
+  roles:
+    - role: zabbix
+      tags: [node5, monitoring, zabbix]
+
+- name: "5e — Graylog log management (node5)"
+  hosts: monitoring
+  gather_facts: true
+  vars_files: [../vault/secrets.yml]
+  roles:
+    - role: graylog
+      tags: [node5, monitoring, graylog]

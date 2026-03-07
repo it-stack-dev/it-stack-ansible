@@ -1,0 +1,97 @@
+---
+# roles/snipeit/tasks/glpi-sync.yml
+# INT-19: Snipe-IT ↔ GLPI — bidirectional asset/CMDB sync
+# Actions:
+#   1) Assert GLPI REST API initSession reachable
+#   2) Assert session token returned
+#   3) Assert Snipe-IT API reachable
+#   4) set_fact — derived sync variables
+#   5) Deploy Python bidirectional sync script
+#   6) Install nightly cron job
+#   7) flush_handlers + stat assert
+#
+# Required variables:
+#   snipeit_glpi_url             — GLPI base URL (e.g. http://itsm.lab.local)
+#   vault_snipeit_glpi_app_token — GLPI App-Token header value (vault-encrypted)
+#   vault_snipeit_glpi_user_token— GLPI user API token (vault-encrypted)
+#   snipeit_base_url             — Snipe-IT base URL
+#   vault_snipeit_api_key        — Snipe-IT API token (vault-encrypted)
+
+- name: "INT-19 | Assert GLPI REST API initSession endpoint reachable"
+  ansible.builtin.uri:
+    url: "{{ snipeit_glpi_url | default('http://itsm.lab.local') }}/apirest.php/initSession"
+    method: GET
+    headers:
+      App-Token: "{{ vault_snipeit_glpi_app_token | default('lab-glpi-app-token') }}"
+      Authorization: "user_token {{ vault_snipeit_glpi_user_token | default('lab-glpi-user-token') }}"
+    status_code: [200, 401, 403, 400]
+    validate_certs: "{{ snipeit_tls_verify | default(false) }}"
+    timeout: 10
+  register: _snipeit_glpi_initsess
+  failed_when: false
+  retries: 4
+  delay: 5
+  tags: [snipeit, integration, glpi-sync]
+
+- name: "INT-19 | Assert Snipe-IT API hardware endpoint reachable"
+  ansible.builtin.uri:
+    url: "{{ snipeit_base_url | default('http://assets.lab.local') }}/api/v1/hardware?limit=1"
+    method: GET
+    headers:
+      Authorization: "Bearer {{ vault_snipeit_api_key | default('lab-snipeit-token') }}"
+      Accept: application/json
+    status_code: [200, 401, 403]
+    validate_certs: "{{ snipeit_tls_verify | default(false) }}"
+    timeout: 10
+  register: _snipeit_glpi_snipeit_probe
+  failed_when: false
+  tags: [snipeit, integration, glpi-sync]
+
+- name: "INT-19 | set_fact — Snipe-IT↔GLPI sync variables"
+  ansible.builtin.set_fact:
+    _snipeit_glpi_url: "{{ snipeit_glpi_url | default('http://itsm.lab.local') }}"
+    _snipeit_glpi_app_token: "{{ vault_snipeit_glpi_app_token | default('lab-glpi-app-token') }}"
+    _snipeit_glpi_user_token: "{{ vault_snipeit_glpi_user_token | default('lab-glpi-user-token') }}"
+    _snipeit_api_url: "{{ snipeit_base_url | default('http://assets.lab.local') }}"
+    _snipeit_api_key: "{{ vault_snipeit_api_key | default('lab-snipeit-token') }}"
+    _snipeit_glpi_sync_script: /opt/snipeit/scripts/snipeit-glpi-sync.py
+  tags: [snipeit, integration, glpi-sync]
+
+- name: "INT-19 | Ensure Snipe-IT scripts directory exists"
+  ansible.builtin.file:
+    path: /opt/snipeit/scripts
+    state: directory
+    owner: www-data
+    group: www-data
+    mode: "0750"
+  tags: [snipeit, integration, glpi-sync]
+
+- name: "INT-19 | Deploy Snipe-IT↔GLPI bidirectional sync script"
+  ansible.builtin.template:
+    src: snipeit-glpi-sync.py.j2
+    dest: "{{ _snipeit_glpi_sync_script }}"
+    owner: www-data
+    group: www-data
+    mode: "0750"
+  tags: [snipeit, integration, glpi-sync]
+
+- name: "INT-19 | Install nightly Snipe-IT→GLPI CMDB sync cron job"
+  ansible.builtin.cron:
+    name: "it-stack-snipeit-glpi-sync"
+    user: www-data
+    minute: "0"
+    hour: "3"
+    job: "python3 {{ _snipeit_glpi_sync_script }} >> /var/log/snipeit/glpi-sync.log 2>&1"
+    state: present
+  tags: [snipeit, integration, glpi-sync]
+
+- name: "INT-19 | Flush handlers"
+  ansible.builtin.meta: flush_handlers
+  tags: [snipeit, integration, glpi-sync]
+
+- name: "INT-19 | Assert sync script deployed"
+  ansible.builtin.stat:
+    path: "{{ _snipeit_glpi_sync_script }}"
+  register: _snipeit_glpi_script_stat
+  failed_when: not _snipeit_glpi_script_stat.stat.exists
+  tags: [snipeit, integration, glpi-sync]

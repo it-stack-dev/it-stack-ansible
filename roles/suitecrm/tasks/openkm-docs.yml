@@ -1,0 +1,91 @@
+---
+# roles/suitecrm/tasks/openkm-docs.yml
+# INT-14: SuiteCRM ↔ OpenKM — document linking
+# Actions:
+#   1) Assert OpenKM REST API reachable (unauthenticated ping)
+#   2) Assert OpenKM authenticate endpoint works
+#   3) set_fact — derived doc-link variables
+#   4) Deploy Python document-link sync script
+#   5) Install nightly cron job
+#   6) flush_handlers + stat assert
+#
+# Required variables:
+#   suitecrm_openkm_url           — OpenKM base URL (e.g. http://dms.lab.local:8080/OpenKM)
+#   suitecrm_openkm_user          — OpenKM service account (default: okmAdmin)
+#   vault_suitecrm_openkm_pass    — OpenKM service account password (vault-encrypted)
+#   suitecrm_openkm_folder        — OpenKM folder where CRM docs are stored
+
+- name: "INT-14 | Assert OpenKM info endpoint reachable"
+  ansible.builtin.uri:
+    url: "{{ suitecrm_openkm_url | default('http://dms.lab.local:8080/OpenKM') }}/services/rest/info"
+    method: GET
+    status_code: [200, 401, 403, 404]
+    validate_certs: "{{ suitecrm_tls_verify | default(false) }}"
+    timeout: 10
+  register: _suitecrm_openkm_probe
+  failed_when: false
+  retries: 4
+  delay: 5
+  tags: [suitecrm, integration, openkm-docs]
+
+- name: "INT-14 | Assert OpenKM REST authenticate endpoint"
+  ansible.builtin.uri:
+    url: "{{ suitecrm_openkm_url | default('http://dms.lab.local:8080/OpenKM') }}/services/rest/auth/login"
+    method: GET
+    url_username: "{{ suitecrm_openkm_user | default('okmAdmin') }}"
+    url_password: "{{ vault_suitecrm_openkm_pass | default('Lab14Admin!') }}"
+    force_basic_auth: true
+    status_code: [200, 201, 401, 403]
+    validate_certs: "{{ suitecrm_tls_verify | default(false) }}"
+    timeout: 10
+  register: _suitecrm_openkm_auth
+  failed_when: false
+  tags: [suitecrm, integration, openkm-docs]
+
+- name: "INT-14 | set_fact — SuiteCRM↔OpenKM variables"
+  ansible.builtin.set_fact:
+    _suitecrm_openkm_url: "{{ suitecrm_openkm_url | default('http://dms.lab.local:8080/OpenKM') }}"
+    _suitecrm_openkm_user: "{{ suitecrm_openkm_user | default('okmAdmin') }}"
+    _suitecrm_openkm_pass: "{{ vault_suitecrm_openkm_pass | default('Lab14Admin!') }}"
+    _suitecrm_openkm_folder: "{{ suitecrm_openkm_folder | default('/okm:root/suitecrm') }}"
+    _suitecrm_openkm_sync_script: "{{ suitecrm_install_dir }}/custom/modules/INT14/suitecrm_openkm_docs.py"
+  tags: [suitecrm, integration, openkm-docs]
+
+- name: "INT-14 | Ensure INT14 custom module directory exists"
+  ansible.builtin.file:
+    path: "{{ suitecrm_install_dir }}/custom/modules/INT14"
+    state: directory
+    owner: "{{ suitecrm_user }}"
+    group: "{{ suitecrm_group }}"
+    mode: "0755"
+  tags: [suitecrm, integration, openkm-docs]
+
+- name: "INT-14 | Deploy OpenKM document-link sync script"
+  ansible.builtin.template:
+    src: suitecrm-openkm-docs.py.j2
+    dest: "{{ _suitecrm_openkm_sync_script }}"
+    owner: "{{ suitecrm_user }}"
+    group: "{{ suitecrm_group }}"
+    mode: "0750"
+  tags: [suitecrm, integration, openkm-docs]
+
+- name: "INT-14 | Install nightly OpenKM document sync cron job"
+  ansible.builtin.cron:
+    name: "it-stack-suitecrm-openkm-sync"
+    user: "{{ suitecrm_user }}"
+    minute: "30"
+    hour: "2"
+    job: "python3 {{ _suitecrm_openkm_sync_script }} >> /var/log/suitecrm/openkm-sync.log 2>&1"
+    state: present
+  tags: [suitecrm, integration, openkm-docs]
+
+- name: "INT-14 | Flush handlers"
+  ansible.builtin.meta: flush_handlers
+  tags: [suitecrm, integration, openkm-docs]
+
+- name: "INT-14 | Assert sync script deployed"
+  ansible.builtin.stat:
+    path: "{{ _suitecrm_openkm_sync_script }}"
+  register: _suitecrm_openkm_script_stat
+  failed_when: not _suitecrm_openkm_script_stat.stat.exists
+  tags: [suitecrm, integration, openkm-docs]

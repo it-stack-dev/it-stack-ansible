@@ -1,0 +1,38 @@
+# IT-Stack ansible-lint configuration
+# Profile: basic — covers most important lint rules without being too strict
+
+profile: basic
+
+# Don't require internet for galaxy lookups
+offline: true
+
+# Paths to ignore
+exclude_paths:
+  - .cache/
+  - .git/
+  - molecule/
+  - playbooks/
+
+# Rules to skip — explained:
+warn_list:
+  # Our tasks already have meaningful "INT-XX | ..." names
+  - name[prefix]
+  # Long Jinja2 expressions cause YAML line-length warnings in yaml[line-length]
+  - yaml[line-length]
+  # uri/command tasks genuinely don't change when failed_when: false
+  - no-changed-when
+  # We intentionally use 'false' (lowercase) for YAML booleans  
+  - yaml[truthy]
+  # partial-becomes is for roles without full role structure (task-only files)
+  - partial-becomes
+
+skip_list:
+  # Task-only files don't have a role meta/ directory
+  - role-name
+  # Our 'meta: flush_handlers' tasks have no name intentionally
+  - meta-no-info  # Files have CRLF on Windows; CI enforces LF via .gitattributes
+  - yaml[new-lines]
+  # ansible-lint yaml profile requires min-spaces-from-content: 1 — skip for now
+  - yaml[comments]
+  # skip octal-values conflict between yamllint and ansible-lint yaml profile
+  - yaml[octal-values]

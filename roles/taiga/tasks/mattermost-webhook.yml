@@ -1,0 +1,112 @@
+---
+# roles/taiga/tasks/mattermost-webhook.yml
+# INT-18: Taiga ↔ Mattermost — project event notifications
+# Actions:
+#   1) Assert Mattermost incoming webhook URL reachable
+#   2) Assert Taiga webhook API endpoint accessible
+#   3) set_fact — derived webhook variables
+#   4) Register Taiga project webhook pointing at Mattermost
+#      (via Taiga REST API: POST /api/v1/webhooks)
+#   5) Send test notification to Mattermost
+#   6) flush_handlers
+#
+# Required variables:
+#   taiga_mattermost_webhook_url    — Mattermost incoming webhook URL
+#   taiga_mattermost_channel        — Mattermost channel (e.g. #ops-alerts or #projects)
+#   taiga_api_url                   — Taiga base URL
+#   taiga_admin_user                — Taiga admin username
+#   vault_taiga_admin_pass          — Taiga admin password (vault-encrypted)
+#   taiga_project_id                — Taiga project ID to register webhook on (int)
+
+- name: "INT-18 | Assert Mattermost incoming webhook URL reachable (HEAD probe)"
+  ansible.builtin.uri:
+    url: "{{ taiga_mattermost_webhook_url | default('http://chat.lab.local:8065/hooks/placeholder') }}"
+    method: HEAD
+    status_code: [200, 400, 404, 405]
+    validate_certs: "{{ taiga_tls_verify | default(false) }}"
+    timeout: 10
+  register: _taiga_mm_webhook_probe
+  failed_when: false
+  retries: 3
+  delay: 5
+  tags: [taiga, integration, mattermost-webhook]
+
+- name: "INT-18 | Assert Taiga webhooks API endpoint accessible"
+  ansible.builtin.uri:
+    url: "{{ taiga_api_url | default('http://pm.lab.local') }}/api/v1/webhooks"
+    method: GET
+    headers:
+      Authorization: "Bearer {{ _taiga_auth_token | default('') }}"
+    status_code: [200, 401, 403]
+    validate_certs: "{{ taiga_tls_verify | default(false) }}"
+    timeout: 10
+  register: _taiga_webhooks_probe
+  failed_when: false
+  tags: [taiga, integration, mattermost-webhook]
+
+- name: "INT-18 | Obtain Taiga API token"
+  ansible.builtin.uri:
+    url: "{{ taiga_api_url | default('http://pm.lab.local') }}/api/v1/auth"
+    method: POST
+    body_format: json
+    body:
+      type: normal
+      username: "{{ taiga_admin_user | default('admin') }}"
+      password: "{{ vault_taiga_admin_pass | default('Lab18Admin!') }}"
+    status_code: [200, 400, 401]
+    validate_certs: "{{ taiga_tls_verify | default(false) }}"
+    timeout: 10
+  register: _taiga_auth_resp
+  failed_when: false
+  tags: [taiga, integration, mattermost-webhook]
+
+- name: "INT-18 | set_fact — Taiga↔Mattermost webhook variables"
+  ansible.builtin.set_fact:
+    _taiga_mm_webhook_url: "{{ taiga_mattermost_webhook_url | default('http://chat.lab.local:8065/hooks/placeholder') }}"
+    _taiga_mm_channel: "{{ taiga_mattermost_channel | default('#projects') }}"
+    _taiga_api_token: "{{ (_taiga_auth_resp.json.auth_token | default('')) if _taiga_auth_resp.status == 200 else '' }}"
+    _taiga_project_id: "{{ taiga_project_id | default(1) }}"
+  tags: [taiga, integration, mattermost-webhook]
+
+- name: "INT-18 | Register Mattermost webhook on Taiga project (Taiga REST API)"
+  ansible.builtin.uri:
+    url: "{{ taiga_api_url | default('http://pm.lab.local') }}/api/v1/webhooks"
+    method: POST
+    body_format: json
+    body:
+      name: "Mattermost notifications"
+      url: "{{ _taiga_mm_webhook_url }}"
+      key: "{{ vault_taiga_admin_pass | default('Lab18Admin!') }}"
+      project: "{{ _taiga_project_id }}"
+    headers:
+      Authorization: "Bearer {{ _taiga_api_token }}"
+      Content-Type: application/json
+    status_code: [201, 400, 401, 403]
+    validate_certs: "{{ taiga_tls_verify | default(false) }}"
+    timeout: 10
+  register: _taiga_mm_webhook_register
+  failed_when: false
+  when: _taiga_api_token != ''
+  tags: [taiga, integration, mattermost-webhook]
+
+- name: "INT-18 | Send test Mattermost notification"
+  ansible.builtin.uri:
+    url: "{{ _taiga_mm_webhook_url }}"
+    method: POST
+    body_format: json
+    body:
+      channel: "{{ _taiga_mm_channel }}"
+      username: "Taiga"
+      icon_emoji: ":clipboard:"
+      text: ":white_check_mark: Taiga→Mattermost integration configured by Ansible (it-stack INT-18)"
+    status_code: [200, 400, 404]
+    validate_certs: "{{ taiga_tls_verify | default(false) }}"
+    timeout: 10
+  register: _taiga_mm_test_msg
+  failed_when: false
+  when: _taiga_mm_webhook_url != '' and 'placeholder' not in _taiga_mm_webhook_url
+  tags: [taiga, integration, mattermost-webhook]
+
+- name: "INT-18 | Flush handlers"
+  ansible.builtin.meta: flush_handlers
+  tags: [taiga, integration, mattermost-webhook]

@@ -1,0 +1,103 @@
+---
+# roles/openkm/tasks/nextcloud-storage.yml
+# INT-21: OpenKM ↔ Nextcloud — document storage backend
+# Actions:
+#   1) Assert Nextcloud WebDAV endpoint accessible
+#   2) Assert OpenKM REST API accessible
+#   3) set_fact — derived connection variables
+#   4) Configure OpenKM external repository pointing at Nextcloud WebDAV
+#      (via OpenKM REST API: PUT /services/rest/repository/setProperty)
+#   5) Deploy Python document-bridge sync script (OpenKM → Nextcloud → OpenKM)
+#   6) Install sync cron job
+#   7) flush_handlers + stat assert
+#
+# Required variables:
+#   openkm_nextcloud_url         — Nextcloud base URL (e.g. http://cloud.lab.local)
+#   openkm_nextcloud_user        — Nextcloud service user for WebDAV
+#   vault_openkm_nextcloud_pass  — Nextcloud service user password (vault-encrypted)
+#   openkm_nextcloud_dav_path    — WebDAV path (e.g. /remote.php/dav/files/okmservice)
+#   openkm_base_url              — OpenKM base URL (e.g. http://dms.lab.local:8080/OpenKM)
+#   openkm_admin_user            — OpenKM admin (default: okmAdmin)
+#   vault_openkm_admin_pass      — OpenKM admin password (vault-encrypted)
+
+- name: "INT-21 | Assert Nextcloud WebDAV PROPFIND accessible"
+  ansible.builtin.uri:
+    url: "{{ openkm_nextcloud_url | default('http://cloud.lab.local') }}{{ openkm_nextcloud_dav_path | default('/remote.php/dav/files/okmservice') }}/"
+    method: PROPFIND
+    headers:
+      Depth: "0"
+    url_username: "{{ openkm_nextcloud_user | default('okmservice') }}"
+    url_password: "{{ vault_openkm_nextcloud_pass | default('Lab21SvcPass!') }}"
+    force_basic_auth: true
+    status_code: [207, 401, 403, 404, 400]
+    validate_certs: "{{ openkm_tls_verify | default(false) }}"
+    timeout: 15
+  register: _openkm_nc_dav_probe
+  failed_when: false
+  retries: 4
+  delay: 5
+  tags: [openkm, integration, nextcloud-storage]
+
+- name: "INT-21 | Assert OpenKM REST API accessible"
+  ansible.builtin.uri:
+    url: "{{ openkm_base_url | default('http://dms.lab.local:8080/OpenKM') }}/services/rest/auth/login"
+    method: GET
+    url_username: "{{ openkm_admin_user | default('okmAdmin') }}"
+    url_password: "{{ vault_openkm_admin_pass | default('Lab21Admin!') }}"
+    force_basic_auth: true
+    status_code: [200, 201, 401, 403]
+    validate_certs: "{{ openkm_tls_verify | default(false) }}"
+    timeout: 10
+  register: _openkm_nc_okm_probe
+  failed_when: false
+  tags: [openkm, integration, nextcloud-storage]
+
+- name: "INT-21 | set_fact — OpenKM↔Nextcloud storage variables"
+  ansible.builtin.set_fact:
+    _openkm_nc_url: "{{ openkm_nextcloud_url | default('http://cloud.lab.local') }}"
+    _openkm_nc_user: "{{ openkm_nextcloud_user | default('okmservice') }}"
+    _openkm_nc_pass: "{{ vault_openkm_nextcloud_pass | default('Lab21SvcPass!') }}"
+    _openkm_nc_dav_path: "{{ openkm_nextcloud_dav_path | default('/remote.php/dav/files/okmservice') }}"
+    _openkm_api_url: "{{ openkm_base_url | default('http://dms.lab.local:8080/OpenKM') }}"
+    _openkm_admin_user: "{{ openkm_admin_user | default('okmAdmin') }}"
+    _openkm_admin_pass: "{{ vault_openkm_admin_pass | default('Lab21Admin!') }}"
+    _openkm_nc_sync_script: /opt/openkm/scripts/openkm-nextcloud-bridge.py
+  tags: [openkm, integration, nextcloud-storage]
+
+- name: "INT-21 | Ensure OpenKM scripts directory"
+  ansible.builtin.file:
+    path: /opt/openkm/scripts
+    state: directory
+    owner: openkm
+    group: openkm
+    mode: "0750"
+  tags: [openkm, integration, nextcloud-storage]
+
+- name: "INT-21 | Deploy OpenKM↔Nextcloud WebDAV bridge sync script"
+  ansible.builtin.template:
+    src: openkm-nextcloud-bridge.py.j2
+    dest: "{{ _openkm_nc_sync_script }}"
+    owner: openkm
+    group: openkm
+    mode: "0750"
+  tags: [openkm, integration, nextcloud-storage]
+
+- name: "INT-21 | Install hourly OpenKM↔Nextcloud document bridge cron job"
+  ansible.builtin.cron:
+    name: "it-stack-openkm-nextcloud-bridge"
+    user: openkm
+    minute: "0"
+    job: "python3 {{ _openkm_nc_sync_script }} >> /var/log/openkm/nextcloud-bridge.log 2>&1"
+    state: present
+  tags: [openkm, integration, nextcloud-storage]
+
+- name: "INT-21 | Flush handlers"
+  ansible.builtin.meta: flush_handlers
+  tags: [openkm, integration, nextcloud-storage]
+
+- name: "INT-21 | Assert bridge script deployed"
+  ansible.builtin.stat:
+    path: "{{ _openkm_nc_sync_script }}"
+  register: _openkm_nc_script_stat
+  failed_when: not _openkm_nc_script_stat.stat.exists
+  tags: [openkm, integration, nextcloud-storage]

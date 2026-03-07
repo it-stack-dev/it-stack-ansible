@@ -1,0 +1,208 @@
+---
+# playbooks/site-1node.yml
+# IT-Stack — Single Node Deployment (All 20 services on one machine)
+#
+# Tier:        1A — Lab / Home Lab
+# Computers:   1
+# Min RAM:     64 GB (recommended) / 32 GB (reduced — skip jitsi, freepbx, graylog)
+# Min CPU:     16 vCPU
+# Min Disk:    500 GB SSD
+#
+# Usage:
+#   ansible-playbook -i inventory/hosts-1node.ini playbooks/site-1node.yml \
+#     --vault-password-file .vault_pass -e "ansible_user=ubuntu"
+#
+# --tags options:
+#   foundation     — FreeIPA, PostgreSQL, Redis, Keycloak, Traefik, Elasticsearch
+#   collaboration  — Nextcloud, Mattermost, Jitsi
+#   communications — iRedMail, FreePBX, Zammad
+#   business       — SuiteCRM, Odoo, OpenKM
+#   it_management  — Taiga, Snipe-IT, GLPI
+#   monitoring     — Zabbix, Graylog
+#
+# Notes:
+# - FreeIPA is installed in simplified mode (no DNS delegation, /etc/hosts used)
+# - All services bind to different ports; Traefik routes by subdomain on port 443
+# - Java services (Keycloak, Elasticsearch, Graylog) have reduced heap sizes
+# - FreePBX SIP ports 5060/5061 still bind to the single NIC
+# ─────────────────────────────────────────────────────────────────────────────
+
+# ── 0. Common base ────────────────────────────────────────────────────────────
+- name: "0 — Base OS hardening (all)"
+  hosts: all_servers
+  gather_facts: true
+  vars_files: [../vault/secrets.yml]
+  roles:
+    - role: common
+      tags: [always, common]
+
+# ── 1. Identity ───────────────────────────────────────────────────────────────
+- name: "1a — FreeIPA (single-node, no DNS delegation)"
+  hosts: identity
+  gather_facts: true
+  vars_files: [../vault/secrets.yml]
+  vars:
+    freeipa_no_dns_delegation: true
+    freeipa_forwarder: "1.1.1.1"
+  roles:
+    - role: freeipa
+      tags: [foundation, identity, freeipa]
+
+- name: "1b — Keycloak SSO"
+  hosts: identity
+  gather_facts: true
+  vars_files: [../vault/secrets.yml]
+  roles:
+    - role: keycloak
+      tags: [foundation, identity, keycloak]
+
+# ── 2. Database ───────────────────────────────────────────────────────────────
+- name: "2a — PostgreSQL"
+  hosts: database
+  gather_facts: true
+  vars_files: [../vault/secrets.yml]
+  roles:
+    - role: postgresql
+      tags: [foundation, database, postgresql]
+
+- name: "2b — Redis"
+  hosts: database
+  gather_facts: true
+  vars_files: [../vault/secrets.yml]
+  roles:
+    - role: redis
+      tags: [foundation, database, redis]
+
+- name: "2c — Elasticsearch"
+  hosts: database
+  gather_facts: true
+  vars_files: [../vault/secrets.yml]
+  roles:
+    - role: elasticsearch
+      tags: [foundation, database, elasticsearch]
+
+# ── 3. Infrastructure ─────────────────────────────────────────────────────────
+- name: "3 — Traefik reverse proxy"
+  hosts: infrastructure
+  gather_facts: true
+  vars_files: [../vault/secrets.yml]
+  roles:
+    - role: traefik
+      tags: [foundation, infrastructure, traefik]
+
+# ── 4. Collaboration ──────────────────────────────────────────────────────────
+- name: "4a — Nextcloud"
+  hosts: collaboration
+  gather_facts: true
+  vars_files: [../vault/secrets.yml]
+  roles:
+    - role: nextcloud
+      tags: [collaboration, nextcloud]
+
+- name: "4b — Mattermost"
+  hosts: collaboration
+  gather_facts: true
+  vars_files: [../vault/secrets.yml]
+  roles:
+    - role: mattermost
+      tags: [collaboration, mattermost]
+
+- name: "4c — Jitsi Meet"
+  hosts: collaboration
+  gather_facts: true
+  vars_files: [../vault/secrets.yml]
+  roles:
+    - role: jitsi
+      tags: [collaboration, jitsi]
+
+# ── 5. Communications ─────────────────────────────────────────────────────────
+- name: "5a — iRedMail"
+  hosts: communications
+  gather_facts: true
+  vars_files: [../vault/secrets.yml]
+  roles:
+    - role: iredmail
+      tags: [communications, iredmail]
+
+- name: "5b — Zammad help desk"
+  hosts: communications
+  gather_facts: true
+  vars_files: [../vault/secrets.yml]
+  roles:
+    - role: zammad
+      tags: [communications, zammad]
+
+- name: "5c — FreePBX / Asterisk"
+  hosts: voip
+  gather_facts: true
+  vars_files: [../vault/secrets.yml]
+  roles:
+    - role: freepbx
+      tags: [communications, freepbx]
+
+# ── 6. Business Systems ───────────────────────────────────────────────────────
+- name: "6a — SuiteCRM"
+  hosts: business
+  gather_facts: true
+  vars_files: [../vault/secrets.yml]
+  roles:
+    - role: suitecrm
+      tags: [business, suitecrm]
+
+- name: "6b — Odoo ERP"
+  hosts: business
+  gather_facts: true
+  vars_files: [../vault/secrets.yml]
+  roles:
+    - role: odoo
+      tags: [business, odoo]
+
+- name: "6c — OpenKM document management"
+  hosts: business
+  gather_facts: true
+  vars_files: [../vault/secrets.yml]
+  roles:
+    - role: openkm
+      tags: [business, openkm]
+
+# ── 7. IT & Project Management ────────────────────────────────────────────────
+- name: "7a — Taiga project management"
+  hosts: it_management
+  gather_facts: true
+  vars_files: [../vault/secrets.yml]
+  roles:
+    - role: taiga
+      tags: [it_management, taiga]
+
+- name: "7b — Snipe-IT asset management"
+  hosts: it_management
+  gather_facts: true
+  vars_files: [../vault/secrets.yml]
+  roles:
+    - role: snipeit
+      tags: [it_management, snipeit]
+
+- name: "7c — GLPI ITSM"
+  hosts: it_management
+  gather_facts: true
+  vars_files: [../vault/secrets.yml]
+  roles:
+    - role: glpi
+      tags: [it_management, glpi]
+
+# ── 8. Monitoring & Observability ─────────────────────────────────────────────
+- name: "8a — Zabbix monitoring"
+  hosts: infrastructure
+  gather_facts: true
+  vars_files: [../vault/secrets.yml]
+  roles:
+    - role: zabbix
+      tags: [monitoring, zabbix]
+
+- name: "8b — Graylog log management"
+  hosts: infrastructure
+  gather_facts: true
+  vars_files: [../vault/secrets.yml]
+  roles:
+    - role: graylog
+      tags: [monitoring, graylog]

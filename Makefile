@@ -9,6 +9,7 @@ VAULT_ARGS    := --vault-password-file .vault_pass
         deploy-elasticsearch deploy-freepbx deploy-suitecrm deploy-odoo deploy-openkm \
         deploy-taiga deploy-snipeit deploy-glpi deploy-zabbix deploy-graylog \
         deploy-phase2 deploy-phase3 deploy-phase4 \
+        deploy-1node deploy-2node deploy-3node deploy-4node deploy-5node \
         ping facts vault-edit vault-view
 
 ## help         Show this help
@@ -122,6 +123,27 @@ deploy-graylog:
 
 ## deploy-phase4         Deploy all Phase 4 IT management services
 deploy-phase4: deploy-taiga deploy-snipeit deploy-glpi deploy-zabbix deploy-graylog
+
+# ── Lab Tiers (limited hardware) ──────────────────────────────────────────────
+## deploy-1node  Deploy full stack on a single machine (64 GB RAM min)
+deploy-1node:
+	$(ANSIBLE) -i inventory/hosts-1node.ini $(VAULT_ARGS) playbooks/site-1node.yml
+
+## deploy-2node  Deploy stack across 2 nodes (32 GB each)
+deploy-2node:
+	$(ANSIBLE) -i inventory/hosts-2node.ini $(VAULT_ARGS) playbooks/site-2node.yml
+
+## deploy-3node  Deploy stack across 3 nodes (32+24+24 GB)
+deploy-3node:
+	$(ANSIBLE) -i inventory/hosts-3node.ini $(VAULT_ARGS) playbooks/site-3node.yml
+
+## deploy-4node  Deploy stack across 4 nodes (16+32+24+24 GB)
+deploy-4node:
+	$(ANSIBLE) -i inventory/hosts-4node.ini $(VAULT_ARGS) playbooks/site-4node.yml
+
+## deploy-5node  Deploy stack across 5 nodes — near-production (recommended lab min)
+deploy-5node:
+	$(ANSIBLE) -i inventory/hosts-5node.ini $(VAULT_ARGS) playbooks/site-5node.yml
 
 ## ping         Test connectivity to all hosts
 ping:

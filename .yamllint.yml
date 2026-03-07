@@ -1,0 +1,58 @@
+---
+# IT-Stack yamllint configuration
+# Applies to all YAML files in the ansible repo
+
+extends: default
+
+rules:
+  # 160 chars is generous; our task files have long Jinja2 interpolations
+  line-length:
+    max: 160
+    level: warning
+
+  # Allow both 'true/false' and Ansible-style 'yes/no'
+  truthy:
+    allowed-values: ['true', 'false', 'yes', 'no']
+    check-keys: false
+
+  # Require space after # in comments; 2 spaces before inline comments
+  comments:
+    require-starting-space: true
+    ignore-shebangs: true
+    min-spaces-from-content: 2
+
+  # 2-space indentation, consistent
+  indentation:
+    spaces: 2
+    indent-sequences: true
+    check-multi-line-strings: false
+
+  # Allow empty lines between tasks (helpful for readability)
+  empty-lines:
+    max: 2
+    max-start: 0
+    max-end: 1
+
+  # Octal values: 0644 triggers this; we use quoted mode strings so no issue
+  octal-values:
+    forbid-implicit-octal: true
+    forbid-explicit-octal: false
+
+  # Files on Windows have CRLF (dos) line endings.
+  # CI on Linux should enforce LF via .gitattributes / git core.autocrlf.
+  new-lines:
+    type: dos
+
+  # Allow bare colons in strings (common in Ansible URLs)
+  colons:
+    max-spaces-before: 0
+    max-spaces-after: 1
+
+  # --- Relaxed rules ---
+  braces:
+    min-spaces-inside: 0
+    max-spaces-inside: 1
+  brackets:
+    min-spaces-inside: 0
+    max-spaces-inside: 1
+  document-start: disable  # '---' not required on every file by yamllint

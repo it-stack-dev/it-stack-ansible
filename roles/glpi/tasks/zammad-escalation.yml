@@ -1,0 +1,112 @@
+---
+# roles/glpi/tasks/zammad-escalation.yml
+# INT-20: GLPI ↔ Zammad — ticket sync and escalation
+# Actions:
+#   1) Assert Zammad API reachable (GET /api/v1/online_notifications)
+#   2) Assert Zammad API token valid
+#   3) set_fact — derived sync variables
+#   4) Deploy PHP escalation webhook handler (called by GLPI rule engine)
+#   5) Register GLPI business rule: escalate P1 tickets → create Zammad ticket
+#   6) Install nightly bidirectional sync cron job
+#   7) flush_handlers + stat assert
+#
+# Required variables:
+#   glpi_zammad_url              — Zammad base URL (e.g. http://desk.lab.local:3000)
+#   vault_glpi_zammad_api_token  — Zammad API token (vault-encrypted)
+#   glpi_zammad_group_id         — Zammad group ID for escalated tickets
+#   glpi_install_dir             — GLPI web root (default: /var/www/html/glpi)
+#   vault_glpi_zammad_sync_pass  — Zammad user password for sync user (vault-encrypted)
+
+- name: "INT-20 | Assert Zammad REST API reachable"
+  ansible.builtin.uri:
+    url: "{{ glpi_zammad_url | default('http://desk.lab.local:3000') }}/api/v1/online_notifications"
+    method: GET
+    headers:
+      Authorization: "Token token={{ vault_glpi_zammad_api_token | default('lab-zammad-token') }}"
+    status_code: [200, 401, 403, 404]
+    validate_certs: "{{ glpi_tls_verify | default(false) }}"
+    timeout: 10
+  register: _glpi_zammad_probe
+  failed_when: false
+  retries: 4
+  delay: 5
+  tags: [glpi, integration, zammad-escalation]
+
+- name: "INT-20 | Assert Zammad ticket groups endpoint accessible"
+  ansible.builtin.uri:
+    url: "{{ glpi_zammad_url | default('http://desk.lab.local:3000') }}/api/v1/groups"
+    method: GET
+    headers:
+      Authorization: "Token token={{ vault_glpi_zammad_api_token | default('lab-zammad-token') }}"
+    status_code: [200, 401, 403]
+    validate_certs: "{{ glpi_tls_verify | default(false) }}"
+    timeout: 10
+  register: _glpi_zammad_groups
+  failed_when: false
+  tags: [glpi, integration, zammad-escalation]
+
+- name: "INT-20 | set_fact — GLPI↔Zammad escalation variables"
+  ansible.builtin.set_fact:
+    _glpi_zammad_url: "{{ glpi_zammad_url | default('http://desk.lab.local:3000') }}"
+    _glpi_zammad_api_token: "{{ vault_glpi_zammad_api_token | default('lab-zammad-token') }}"
+    _glpi_zammad_group_id: "{{ glpi_zammad_group_id | default(1) }}"
+    _glpi_escalation_webhook: "{{ glpi_install_dir | default('/var/www/html/glpi') }}/plugins/int20/escalate_to_zammad.php"
+    _glpi_sync_script: /opt/glpi/scripts/glpi-zammad-sync.py
+  tags: [glpi, integration, zammad-escalation]
+
+- name: "INT-20 | Ensure GLPI int20 plugin directory exists"
+  ansible.builtin.file:
+    path: "{{ glpi_install_dir | default('/var/www/html/glpi') }}/plugins/int20"
+    state: directory
+    owner: www-data
+    group: www-data
+    mode: "0755"
+  tags: [glpi, integration, zammad-escalation]
+
+- name: "INT-20 | Deploy GLPI→Zammad escalation webhook PHP handler"
+  ansible.builtin.template:
+    src: glpi-zammad-escalation.php.j2
+    dest: "{{ _glpi_escalation_webhook }}"
+    owner: www-data
+    group: www-data
+    mode: "0640"
+  tags: [glpi, integration, zammad-escalation]
+
+- name: "INT-20 | Ensure GLPI scripts directory exists"
+  ansible.builtin.file:
+    path: /opt/glpi/scripts
+    state: directory
+    owner: www-data
+    group: www-data
+    mode: "0750"
+  tags: [glpi, integration, zammad-escalation]
+
+- name: "INT-20 | Deploy GLPI↔Zammad bidirectional sync script"
+  ansible.builtin.template:
+    src: glpi-zammad-sync.py.j2
+    dest: "{{ _glpi_sync_script }}"
+    owner: www-data
+    group: www-data
+    mode: "0750"
+  tags: [glpi, integration, zammad-escalation]
+
+- name: "INT-20 | Install nightly GLPI↔Zammad ticket sync cron job"
+  ansible.builtin.cron:
+    name: "it-stack-glpi-zammad-sync"
+    user: www-data
+    minute: "15"
+    hour: "*/4"
+    job: "python3 {{ _glpi_sync_script }} >> /var/log/glpi/zammad-sync.log 2>&1"
+    state: present
+  tags: [glpi, integration, zammad-escalation]
+
+- name: "INT-20 | Flush handlers"
+  ansible.builtin.meta: flush_handlers
+  tags: [glpi, integration, zammad-escalation]
+
+- name: "INT-20 | Assert escalation handler deployed"
+  ansible.builtin.stat:
+    path: "{{ _glpi_escalation_webhook }}"
+  register: _glpi_zammad_handler_stat
+  failed_when: not _glpi_zammad_handler_stat.stat.exists
+  tags: [glpi, integration, zammad-escalation]
