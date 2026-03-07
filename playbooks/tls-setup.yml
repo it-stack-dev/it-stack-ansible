@@ -1,0 +1,356 @@
+---
+# playbooks/tls-setup.yml
+#
+# Internal PKI — create a private CA, generate per-service TLS certificates,
+# distribute the CA cert to all nodes as a trusted root, and configure Traefik
+# to serve HTTPS using the generated certificates.
+#
+# Requires: community.crypto collection (installed via requirements.yml)
+#
+# What this creates:
+#   lab-proxy1:/etc/ssl/it-stack/ca/
+#     ca.key            — CA private key (AES-256 encrypted with vault passphrase)
+#     ca.crt            — CA certificate (2048-bit RSA, 10-year validity)
+#   Per-host:/etc/ssl/it-stack/
+#     <hostname>.key    — Server private key
+#     <hostname>.crt    — Server certificate (signed by IT-Stack CA)
+#     <hostname>-bundle.crt — Server cert + CA cert chain
+#   /usr/local/share/ca-certificates/it-stack-ca.crt → update-ca-certificates
+#
+# Traefik picks up certs via dynamic/tls.yml (per-service SNI routing)
+#
+# Usage:
+#   make tls
+#   ansible-playbook -i inventory/hosts.ini --vault-password-file .vault_pass playbooks/tls-setup.yml
+#   ansible-playbook ... --tags ca          # CA setup only
+#   ansible-playbook ... --tags certs       # cert generation only
+#   ansible-playbook ... --tags distribute  # distribute CA trust only
+#   ansible-playbook ... --tags traefik     # update Traefik TLS config only
+
+- name: "TLS | Create internal Certificate Authority on lab-proxy1"
+  hosts: proxy
+  become: true
+  vars_files:
+    - ../vault/secrets.yml
+
+  vars:
+    tls_ca_dir:         /etc/ssl/it-stack/ca
+    tls_ca_key:         /etc/ssl/it-stack/ca/ca.key
+    tls_ca_cert:        /etc/ssl/it-stack/ca/ca.crt
+    tls_ca_days:        3650          # 10 years
+    tls_cert_days:      825           # Apple/browser max
+    tls_key_size:       4096
+    tls_ca_subject:
+      common_name:          "IT-Stack Internal CA"
+      organization_name:    "IT-Stack"
+      organizational_unit_name: "Infrastructure"
+      country_name:         "US"
+      state_or_province_name: "Lab"
+      locality_name:        "Lab"
+
+  tasks:
+    - name: "CA | Ensure CA directory exists"
+      ansible.builtin.file:
+        path: "{{ tls_ca_dir }}"
+        state: directory
+        owner: root
+        group: root
+        mode: "0700"
+      tags: ca
+
+    - name: "CA | Generate CA private key (4096-bit RSA, passphrase-protected)"
+      community.crypto.openssl_privatekey:
+        path: "{{ tls_ca_key }}"
+        size: "{{ tls_key_size }}"
+        type: RSA
+        passphrase: "{{ vault_internal_ca_passphrase }}"
+        cipher: auto
+        owner: root
+        group: root
+        mode: "0600"
+        state: present
+      tags: ca
+
+    - name: "CA | Generate CA self-signed certificate"
+      community.crypto.x509_certificate:
+        path: "{{ tls_ca_cert }}"
+        privatekey_path: "{{ tls_ca_key }}"
+        privatekey_passphrase: "{{ vault_internal_ca_passphrase }}"
+        provider: selfsigned
+        selfsigned_digest: sha256
+        selfsigned_not_after: "+{{ tls_ca_days }}d"
+        subject:
+          CN:  "{{ tls_ca_subject.common_name }}"
+          O:   "{{ tls_ca_subject.organization_name }}"
+          OU:  "{{ tls_ca_subject.organizational_unit_name }}"
+          C:   "{{ tls_ca_subject.country_name }}"
+          ST:  "{{ tls_ca_subject.state_or_province_name }}"
+          L:   "{{ tls_ca_subject.locality_name }}"
+        subject_alt_name:
+          - "DNS:IT-Stack Internal CA"
+        basic_constraints:
+          - "CA:TRUE"
+          - "pathlen:0"
+        basic_constraints_critical: true
+        key_usage:
+          - keyCertSign
+          - cRLSign
+        key_usage_critical: true
+        owner: root
+        group: root
+        mode: "0644"
+      tags: ca
+
+    - name: "CA | Fetch CA cert to controller for distribution"
+      ansible.builtin.fetch:
+        src: "{{ tls_ca_cert }}"
+        dest: "/tmp/it-stack-ca.crt"
+        flat: true
+      tags: [ca, distribute]
+
+# ─────────────────────────────────────────────────────────────────────────────
+- name: "TLS | Generate per-host certificates (signed by internal CA)"
+  hosts: all
+  become: true
+  vars_files:
+    - ../vault/secrets.yml
+
+  vars:
+    tls_dir:            /etc/ssl/it-stack
+    tls_ca_key:         /etc/ssl/it-stack/ca/ca.key     # only on proxy
+    tls_ca_cert_local:  /tmp/it-stack-ca.crt             # fetched to controller
+    tls_key_size:       2048
+    tls_cert_days:      825
+    tls_org:            "IT-Stack"
+
+    # Service SAN entries per server role — each cert covers all services on that host
+    tls_host_san_map:
+      lab-id1:
+        - "DNS:lab-id1"
+        - "DNS:lab-id1.{{ it_stack_internal_domain }}"
+        - "DNS:ipa.{{ it_stack_domain }}"
+        - "DNS:keycloak.{{ it_stack_domain }}"
+        - "DNS:sso.{{ it_stack_domain }}"
+        - "IP:{{ hostvars['lab-id1']['ansible_host'] | default('10.0.50.11') }}"
+      lab-db1:
+        - "DNS:lab-db1"
+        - "DNS:lab-db1.{{ it_stack_internal_domain }}"
+        - "IP:{{ hostvars['lab-db1']['ansible_host'] | default('10.0.50.12') }}"
+      lab-app1:
+        - "DNS:lab-app1"
+        - "DNS:lab-app1.{{ it_stack_internal_domain }}"
+        - "DNS:cloud.{{ it_stack_domain }}"
+        - "DNS:chat.{{ it_stack_domain }}"
+        - "DNS:meet.{{ it_stack_domain }}"
+        - "IP:{{ hostvars['lab-app1']['ansible_host'] | default('10.0.50.13') }}"
+      lab-comm1:
+        - "DNS:lab-comm1"
+        - "DNS:lab-comm1.{{ it_stack_internal_domain }}"
+        - "DNS:mail.{{ it_stack_domain }}"
+        - "DNS:desk.{{ it_stack_domain }}"
+        - "DNS:zabbix.{{ it_stack_domain }}"
+        - "IP:{{ hostvars['lab-comm1']['ansible_host'] | default('10.0.50.14') }}"
+      lab-proxy1:
+        - "DNS:lab-proxy1"
+        - "DNS:lab-proxy1.{{ it_stack_internal_domain }}"
+        - "DNS:traefik.{{ it_stack_domain }}"
+        - "DNS:logs.{{ it_stack_domain }}"
+        - "DNS:proxy.{{ it_stack_domain }}"
+        - "IP:{{ hostvars['lab-proxy1']['ansible_host'] | default('10.0.50.15') }}"
+      lab-pbx1:
+        - "DNS:lab-pbx1"
+        - "DNS:lab-pbx1.{{ it_stack_internal_domain }}"
+        - "DNS:pbx.{{ it_stack_domain }}"
+        - "DNS:phone.{{ it_stack_domain }}"
+        - "IP:{{ hostvars['lab-pbx1']['ansible_host'] | default('10.0.50.16') }}"
+      lab-biz1:
+        - "DNS:lab-biz1"
+        - "DNS:lab-biz1.{{ it_stack_internal_domain }}"
+        - "DNS:crm.{{ it_stack_domain }}"
+        - "DNS:erp.{{ it_stack_domain }}"
+        - "DNS:dms.{{ it_stack_domain }}"
+        - "IP:{{ hostvars['lab-biz1']['ansible_host'] | default('10.0.50.17') }}"
+      lab-mgmt1:
+        - "DNS:lab-mgmt1"
+        - "DNS:lab-mgmt1.{{ it_stack_internal_domain }}"
+        - "DNS:projects.{{ it_stack_domain }}"
+        - "DNS:assets.{{ it_stack_domain }}"
+        - "DNS:itsm.{{ it_stack_domain }}"
+        - "IP:{{ hostvars['lab-mgmt1']['ansible_host'] | default('10.0.50.18') }}"
+
+  tasks:
+    - name: "Certs | Ensure TLS directory exists on each host"
+      ansible.builtin.file:
+        path: "{{ tls_dir }}"
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+      tags: certs
+
+    - name: "Certs | Generate host private key"
+      community.crypto.openssl_privatekey:
+        path: "{{ tls_dir }}/{{ inventory_hostname }}.key"
+        size: "{{ tls_key_size }}"
+        type: RSA
+        owner: root
+        group: root
+        mode: "0640"
+        state: present
+      tags: certs
+
+    - name: "Certs | Generate host CSR"
+      community.crypto.openssl_csr:
+        path: "{{ tls_dir }}/{{ inventory_hostname }}.csr"
+        privatekey_path: "{{ tls_dir }}/{{ inventory_hostname }}.key"
+        common_name: "{{ inventory_hostname }}.{{ it_stack_internal_domain }}"
+        organization_name: "{{ tls_org }}"
+        subject_alt_name: "{{ tls_host_san_map[inventory_hostname] | default(['DNS:' + inventory_hostname]) }}"
+        key_usage:
+          - digitalSignature
+          - keyEncipherment
+        extended_key_usage:
+          - serverAuth
+          - clientAuth
+        owner: root
+        group: root
+        mode: "0644"
+      tags: certs
+
+    # Sign CSR on the CA host (lab-proxy1)
+    - name: "Certs | Fetch CSR to controller for signing"
+      ansible.builtin.fetch:
+        src: "{{ tls_dir }}/{{ inventory_hostname }}.csr"
+        dest: "/tmp/it-stack-csr-{{ inventory_hostname }}.csr"
+        flat: true
+      tags: certs
+
+    - name: "Certs | Sign host CSR with internal CA"
+      community.crypto.x509_certificate:
+        path: "/tmp/it-stack-cert-{{ inventory_hostname }}.crt"
+        csr_path: "/tmp/it-stack-csr-{{ inventory_hostname }}.csr"
+        provider: ownca
+        ownca_path: "{{ tls_ca_cert_local }}"
+        ownca_privatekey_path: "/tmp/it-stack-ca.key"   # CA key fetched separately if needed
+        ownca_privatekey_passphrase: "{{ vault_internal_ca_passphrase }}"
+        ownca_digest: sha256
+        ownca_not_after: "+{{ tls_cert_days }}d"
+      delegate_to: localhost
+      become: false
+      tags: certs
+
+    - name: "Certs | Deploy signed certificate to host"
+      ansible.builtin.copy:
+        src: "/tmp/it-stack-cert-{{ inventory_hostname }}.crt"
+        dest: "{{ tls_dir }}/{{ inventory_hostname }}.crt"
+        owner: root
+        group: root
+        mode: "0644"
+      tags: certs
+
+    - name: "Certs | Build certificate bundle (cert + CA chain)"
+      ansible.builtin.shell: |
+        cat {{ tls_dir }}/{{ inventory_hostname }}.crt {{ tls_ca_cert_local }} > \
+            {{ tls_dir }}/{{ inventory_hostname }}-bundle.crt
+      args:
+        creates: "{{ tls_dir }}/{{ inventory_hostname }}-bundle.crt"
+      tags: certs
+
+    # Distribute CA cert as trusted root
+    - name: "Trust | Copy CA cert to system trust store"
+      ansible.builtin.copy:
+        src: "{{ tls_ca_cert_local }}"
+        dest: /usr/local/share/ca-certificates/it-stack-ca.crt
+        owner: root
+        group: root
+        mode: "0644"
+      notify: update ca certificates
+      tags: [trust, distribute]
+
+  handlers:
+    - name: update ca certificates
+      ansible.builtin.command: update-ca-certificates
+      changed_when: true
+
+# ─────────────────────────────────────────────────────────────────────────────
+- name: "TLS | Configure Traefik to use generated certificates"
+  hosts: proxy
+  become: true
+  vars_files:
+    - ../vault/secrets.yml
+
+  vars:
+    traefik_config_dir: "{{ traefik_config_dir | default('/etc/traefik') }}"
+    tls_dir:            /etc/ssl/it-stack
+
+    # All services and their subdomains → Traefik TLS SNI routing
+    traefik_tls_services:
+      - { name: "ipa",       host: "ipa.{{ it_stack_domain }}",       cert_host: "lab-id1" }
+      - { name: "sso",       host: "sso.{{ it_stack_domain }}",       cert_host: "lab-id1" }
+      - { name: "cloud",     host: "cloud.{{ it_stack_domain }}",     cert_host: "lab-app1" }
+      - { name: "chat",      host: "chat.{{ it_stack_domain }}",      cert_host: "lab-app1" }
+      - { name: "meet",      host: "meet.{{ it_stack_domain }}",      cert_host: "lab-app1" }
+      - { name: "mail",      host: "mail.{{ it_stack_domain }}",      cert_host: "lab-comm1" }
+      - { name: "desk",      host: "desk.{{ it_stack_domain }}",      cert_host: "lab-comm1" }
+      - { name: "crm",       host: "crm.{{ it_stack_domain }}",       cert_host: "lab-biz1" }
+      - { name: "erp",       host: "erp.{{ it_stack_domain }}",       cert_host: "lab-biz1" }
+      - { name: "dms",       host: "dms.{{ it_stack_domain }}",       cert_host: "lab-biz1" }
+      - { name: "projects",  host: "projects.{{ it_stack_domain }}",  cert_host: "lab-mgmt1" }
+      - { name: "assets",    host: "assets.{{ it_stack_domain }}",    cert_host: "lab-mgmt1" }
+      - { name: "itsm",      host: "itsm.{{ it_stack_domain }}",      cert_host: "lab-mgmt1" }
+      - { name: "pbx",       host: "pbx.{{ it_stack_domain }}",       cert_host: "lab-pbx1" }
+      - { name: "zabbix",    host: "zabbix.{{ it_stack_domain }}",    cert_host: "lab-comm1" }
+      - { name: "logs",      host: "logs.{{ it_stack_domain }}",      cert_host: "lab-proxy1" }
+      - { name: "traefik",   host: "traefik.{{ it_stack_domain }}",   cert_host: "lab-proxy1" }
+
+  tasks:
+    - name: "Traefik TLS | Copy all service certs to proxy for Traefik"
+      ansible.builtin.copy:
+        src: "/tmp/it-stack-cert-{{ item.cert_host }}.crt"
+        dest: "{{ tls_dir }}/{{ item.name }}.crt"
+        owner: "{{ traefik_user | default('traefik') }}"
+        group: "{{ traefik_group | default('traefik') }}"
+        mode: "0640"
+      loop: "{{ traefik_tls_services }}"
+      tags: traefik
+
+    - name: "Traefik TLS | Copy all service keys to proxy for Traefik"
+      ansible.builtin.copy:
+        src: "{{ tls_dir }}/{{ item.cert_host }}.key"
+        dest: "{{ tls_dir }}/{{ item.name }}.key"
+        remote_src: "{{ item.cert_host == 'lab-proxy1' }}"
+        owner: "{{ traefik_user | default('traefik') }}"
+        group: "{{ traefik_group | default('traefik') }}"
+        mode: "0640"
+      loop: "{{ traefik_tls_services }}"
+      when: item.cert_host == 'lab-proxy1'
+      tags: traefik
+
+    - name: "Traefik TLS | Deploy dynamic TLS configuration"
+      ansible.builtin.template:
+        src: "../roles/traefik/templates/dynamic/tls.yml.j2"
+        dest: "{{ traefik_config_dir }}/dynamic/tls.yml"
+        owner: "{{ traefik_user | default('traefik') }}"
+        group: "{{ traefik_group | default('traefik') }}"
+        mode: "0640"
+      vars:
+        tls_services: "{{ traefik_tls_services }}"
+        tls_base_dir: "{{ tls_dir }}"
+      notify: restart traefik
+      tags: traefik
+
+    - name: "Traefik TLS | Verify Traefik reloaded without errors"
+      ansible.builtin.uri:
+        url: "http://localhost:{{ traefik_dashboard_port | default('8080') }}/api/version"
+        status_code: 200
+      register: traefik_api
+      retries: 6
+      delay: 5
+      until: traefik_api.status == 200
+      tags: traefik
+
+  handlers:
+    - name: restart traefik
+      ansible.builtin.systemd:
+        name: traefik
+        state: restarted

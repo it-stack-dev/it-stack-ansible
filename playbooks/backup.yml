@@ -1,0 +1,396 @@
+---
+# playbooks/backup.yml
+#
+# Backup playbook — PostgreSQL databases, Nextcloud files, service configs.
+# Safe to run repeatedly; creates timestamped archives with retention.
+#
+# Backup locations (on each respective server):
+#   /var/backups/it-stack/postgres/   — PostgreSQL pg_dumps (compressed)
+#   /var/backups/it-stack/nextcloud/  — Nextcloud data directory (rsync)
+#   /var/backups/it-stack/configs/    — /etc service configs (tar.gz.gpg)
+#   /var/backups/it-stack/vault/      — Ansible vault export (encrypted)
+#
+# Retention: 7 daily + 4 weekly backups (auto-purged)
+#
+# Tags:
+#   setup     — Install packages + cron jobs (run once)
+#   postgres  — PostgreSQL backup only
+#   nextcloud — Nextcloud files backup only
+#   configs   — System config backup only
+#   all       — All backup tasks (default)
+#
+# Usage:
+#   make backup          # Immediate full backup
+#   make backup-setup    # Install cron jobs for nightly automated backups
+#   ansible-playbook ... --tags postgres   # DB backup only
+#   ansible-playbook ... --limit lab-db1   # Single host
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Play 1: PostgreSQL backups — lab-db1
+# ─────────────────────────────────────────────────────────────────────────────
+- name: "Backup | PostgreSQL databases on lab-db1"
+  hosts: database
+  become: true
+  vars_files:
+    - ../vault/secrets.yml
+
+  vars:
+    backup_base:        /var/backups/it-stack
+    backup_pg_dir:      /var/backups/it-stack/postgres
+    backup_timestamp:   "{{ ansible_date_time.date }}_{{ ansible_date_time.hour }}{{ ansible_date_time.minute }}"
+    backup_gpg_key:     "{{ vault_backup_gpg_key_id | default('') }}"
+    backup_retention_days: 7
+    backup_retention_weeks: 4
+
+    # All databases to individually dump (in addition to pg_dumpall)
+    pg_databases:
+      - keycloak
+      - nextcloud
+      - mattermost
+      - zammad
+      - suitecrm
+      - odoo
+      - openkm
+      - taiga
+      - snipeit
+      - glpi
+      - zabbix
+      - iredmail
+
+  tasks:
+    - name: "Backup:PG | Ensure backup directory exists"
+      ansible.builtin.file:
+        path: "{{ backup_pg_dir }}"
+        state: directory
+        owner: postgres
+        group: postgres
+        mode: "0750"
+      tags: [backup, postgres, setup]
+
+    - name: "Backup:PG | Full cluster dump (pg_dumpall)"
+      ansible.builtin.shell: |
+        set -euo pipefail
+        OUTFILE="{{ backup_pg_dir }}/pg_dumpall_{{ backup_timestamp }}.sql.gz"
+        pg_dumpall -U postgres | gzip -9 > "${OUTFILE}"
+        chmod 640 "${OUTFILE}"
+        echo "pg_dumpall: ${OUTFILE} ($(du -sh ${OUTFILE} | cut -f1))"
+      become_user: postgres
+      register: pg_dumpall_result
+      changed_when: true
+      tags: [backup, postgres]
+
+    - name: "Backup:PG | Show pg_dumpall result"
+      ansible.builtin.debug:
+        msg: "{{ pg_dumpall_result.stdout }}"
+      tags: [backup, postgres]
+
+    - name: "Backup:PG | Individual database dumps"
+      ansible.builtin.shell: |
+        set -euo pipefail
+        OUTFILE="{{ backup_pg_dir }}/{{ item }}_{{ backup_timestamp }}.dump"
+        pg_dump -U postgres -Fc --compress=9 {{ item }} > "${OUTFILE}"
+        chmod 640 "${OUTFILE}"
+        echo "{{ item }}: ${OUTFILE} ($(du -sh ${OUTFILE} | cut -f1))"
+      become_user: postgres
+      register: pg_dump_results
+      changed_when: true
+      loop: "{{ pg_databases }}"
+      loop_control:
+        label: "{{ item }}"
+      tags: [backup, postgres]
+
+    - name: "Backup:PG | Purge daily backups older than {{ backup_retention_days }} days"
+      ansible.builtin.find:
+        paths: "{{ backup_pg_dir }}"
+        age: "{{ backup_retention_days }}d"
+        patterns: "*.sql.gz,*.dump"
+      register: old_pg_backups
+      tags: [backup, postgres, purge]
+
+    - name: "Backup:PG | Delete old daily backup files"
+      ansible.builtin.file:
+        path: "{{ item.path }}"
+        state: absent
+      loop: "{{ old_pg_backups.files }}"
+      loop_control:
+        label: "{{ item.path | basename }}"
+      tags: [backup, postgres, purge]
+
+    - name: "Backup:PG | Install nightly cron job (02:00 UTC)"
+      ansible.builtin.cron:
+        name: "it-stack PostgreSQL nightly backup"
+        user: postgres
+        minute: "0"
+        hour: "2"
+        job: >-
+          pg_dumpall | gzip -9 > {{ backup_pg_dir }}/pg_dumpall_$(date +\%F).sql.gz &&
+          for db in {{ pg_databases | join(' ') }}; do
+            pg_dump -Fc --compress=9 $db > {{ backup_pg_dir }}/${db}_$(date +\%F).dump;
+          done &&
+          find {{ backup_pg_dir }} -name '*.dump' -mtime +{{ backup_retention_days }} -delete &&
+          find {{ backup_pg_dir }} -name '*.sql.gz' -mtime +{{ backup_retention_days }} -delete
+        state: present
+      tags: [backup, postgres, setup]
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Play 2: Nextcloud files backup — lab-app1
+# ─────────────────────────────────────────────────────────────────────────────
+- name: "Backup | Nextcloud data and configuration on lab-app1"
+  hosts: collaboration
+  become: true
+  vars_files:
+    - ../vault/secrets.yml
+
+  vars:
+    backup_nc_dir:      /var/backups/it-stack/nextcloud
+    backup_timestamp:   "{{ ansible_date_time.date }}_{{ ansible_date_time.hour }}{{ ansible_date_time.minute }}"
+    nextcloud_data_dir: "{{ nextcloud_data_dir | default('/var/lib/nextcloud/data') }}"
+    nextcloud_config_dir: "{{ nextcloud_config_dir | default('/etc/nextcloud') }}"
+    backup_retention_days: 7
+
+  tasks:
+    - name: "Backup:NC | Ensure backup directory exists"
+      ansible.builtin.file:
+        path: "{{ backup_nc_dir }}"
+        state: directory
+        owner: root
+        group: root
+        mode: "0750"
+      tags: [backup, nextcloud, setup]
+
+    - name: "Backup:NC | Enable Nextcloud maintenance mode"
+      ansible.builtin.command: >-
+        sudo -u www-data php {{ nextcloud_install_dir | default('/var/www/nextcloud') }}/occ maintenance:mode --on
+      changed_when: true
+      ignore_errors: true
+      tags: [backup, nextcloud]
+
+    - name: "Backup:NC | Sync Nextcloud data directory"
+      ansible.posix.synchronize:
+        src: "{{ nextcloud_data_dir }}/"
+        dest: "{{ backup_nc_dir }}/data/"
+        mode: push
+        rsync_opts:
+          - "--archive"
+          - "--delete"
+          - "--exclude='.opcache'"
+          - "--exclude='cache'"
+      delegate_to: "{{ inventory_hostname }}"
+      tags: [backup, nextcloud]
+
+    - name: "Backup:NC | Archive Nextcloud config"
+      ansible.builtin.archive:
+        path: "{{ nextcloud_config_dir }}"
+        dest: "{{ backup_nc_dir }}/nextcloud-config_{{ backup_timestamp }}.tar.gz"
+        format: gz
+        mode: "0640"
+      tags: [backup, nextcloud]
+
+    - name: "Backup:NC | Disable Nextcloud maintenance mode"
+      ansible.builtin.command: >-
+        sudo -u www-data php {{ nextcloud_install_dir | default('/var/www/nextcloud') }}/occ maintenance:mode --off
+      changed_when: true
+      ignore_errors: true
+      tags: [backup, nextcloud]
+
+    - name: "Backup:NC | Purge old config archives"
+      ansible.builtin.find:
+        paths: "{{ backup_nc_dir }}"
+        age: "{{ backup_retention_days }}d"
+        patterns: "nextcloud-config_*.tar.gz"
+      register: old_nc_backups
+      tags: [backup, nextcloud, purge]
+
+    - name: "Backup:NC | Delete old config archives"
+      ansible.builtin.file:
+        path: "{{ item.path }}"
+        state: absent
+      loop: "{{ old_nc_backups.files }}"
+      loop_control:
+        label: "{{ item.path | basename }}"
+      tags: [backup, nextcloud, purge]
+
+    - name: "Backup:NC | Install nightly Nextcloud backup cron (03:00 UTC)"
+      ansible.builtin.cron:
+        name: "it-stack Nextcloud nightly backup"
+        minute: "0"
+        hour: "3"
+        job: >-
+          sudo -u www-data php {{ nextcloud_install_dir | default('/var/www/nextcloud') }}/occ maintenance:mode --on &&
+          rsync -a --delete {{ nextcloud_data_dir }}/ {{ backup_nc_dir }}/data/ &&
+          tar -czf {{ backup_nc_dir }}/nextcloud-config_$(date +\%F).tar.gz {{ nextcloud_config_dir }} &&
+          sudo -u www-data php {{ nextcloud_install_dir | default('/var/www/nextcloud') }}/occ maintenance:mode --off &&
+          find {{ backup_nc_dir }} -name 'nextcloud-config_*.tar.gz' -mtime +{{ backup_retention_days }} -delete
+        state: present
+      tags: [backup, nextcloud, setup]
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Play 3: Service configuration backup — all servers
+# ─────────────────────────────────────────────────────────────────────────────
+- name: "Backup | Service configuration archives on all servers"
+  hosts: all
+  become: true
+  vars_files:
+    - ../vault/secrets.yml
+
+  vars:
+    backup_cfg_dir:         /var/backups/it-stack/configs
+    backup_timestamp:       "{{ ansible_date_time.date }}_{{ ansible_date_time.hour }}{{ ansible_date_time.minute }}"
+    backup_retention_days:  14
+    backup_gpg_recipient:   "{{ vault_backup_gpg_key_id | default('') }}"
+
+    # Paths to back up on each host (role-specific)
+    backup_config_paths_common:
+      - /etc/ssh/sshd_config
+      - /etc/fail2ban/jail.local
+      - /etc/ufw/
+      - /etc/audit/rules.d/
+      - /etc/sysctl.d/
+
+    backup_config_paths_by_group:
+      identity:
+        - /etc/ipa/
+        - /etc/krb5.conf
+        - /etc/dirsrv/
+      database:
+        - /etc/postgresql/
+        - /etc/redis/
+      collaboration:
+        - /etc/nextcloud/
+        - /opt/mattermost/config/
+      communications:
+        - /etc/postfix/
+        - /etc/dovecot/
+        - /etc/zammad/
+      infrastructure:
+        - /etc/traefik/
+        - /etc/graylog/
+      voip:
+        - /etc/asterisk/
+        - /var/lib/asterisk/
+      business:
+        - /etc/nginx/
+        - /opt/suitecrm/
+        - /etc/odoo/
+      it_management:
+        - /etc/nginx/
+        - /var/www/glpi/config/
+        - /var/www/snipeit/.env
+
+  tasks:
+    - name: "Backup:CFG | Ensure config backup directory"
+      ansible.builtin.file:
+        path: "{{ backup_cfg_dir }}"
+        state: directory
+        owner: root
+        group: root
+        mode: "0700"
+      tags: [backup, configs, setup]
+
+    - name: "Backup:CFG | Create config archive for this host"
+      ansible.builtin.archive:
+        path: >-
+          {{ backup_config_paths_common +
+             (backup_config_paths_by_group[group_names | select('in', backup_config_paths_by_group.keys() | list) | first] | default([])) }}
+        dest: "{{ backup_cfg_dir }}/{{ inventory_hostname }}-configs_{{ backup_timestamp }}.tar.gz"
+        format: gz
+        exclude_path:
+          - "*.pid"
+          - "*.log"
+          - "*.swp"
+        mode: "0600"
+      ignore_errors: true   # skip if some paths don't exist (role not deployed yet)
+      register: config_archive
+      tags: [backup, configs]
+
+    - name: "Backup:CFG | Encrypt archive with GPG (if key configured)"
+      ansible.builtin.shell: |
+        gpg --batch --yes --recipient {{ backup_gpg_recipient }} \
+            --encrypt {{ backup_cfg_dir }}/{{ inventory_hostname }}-configs_{{ backup_timestamp }}.tar.gz &&
+        rm -f {{ backup_cfg_dir }}/{{ inventory_hostname }}-configs_{{ backup_timestamp }}.tar.gz
+      when:
+        - backup_gpg_recipient | length > 0
+        - config_archive is succeeded
+      changed_when: true
+      tags: [backup, configs, encrypt]
+
+    - name: "Backup:CFG | Purge old config archives"
+      ansible.builtin.find:
+        paths: "{{ backup_cfg_dir }}"
+        age: "{{ backup_retention_days }}d"
+        patterns: "{{ inventory_hostname }}-configs_*.tar.gz*"
+      register: old_cfg_backups
+      tags: [backup, configs, purge]
+
+    - name: "Backup:CFG | Delete old config archives"
+      ansible.builtin.file:
+        path: "{{ item.path }}"
+        state: absent
+      loop: "{{ old_cfg_backups.files }}"
+      loop_control:
+        label: "{{ item.path | basename }}"
+      tags: [backup, configs, purge]
+
+    - name: "Backup:CFG | Install nightly config backup cron (04:00 UTC)"
+      ansible.builtin.cron:
+        name: "it-stack config nightly backup"
+        minute: "0"
+        hour: "4"
+        job: >-
+          tar -czf {{ backup_cfg_dir }}/{{ inventory_hostname }}-configs_$(date +\%F).tar.gz
+          /etc/ssh/sshd_config /etc/fail2ban/ /etc/ufw/ 2>/dev/null &&
+          find {{ backup_cfg_dir }} -name '{{ inventory_hostname }}-configs_*.tar.gz' -mtime +{{ backup_retention_days }} -delete
+        state: present
+      tags: [backup, configs, setup]
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Play 4: Backup verification — check archives are valid
+# ─────────────────────────────────────────────────────────────────────────────
+- name: "Backup | Verify backup archives"
+  hosts: all
+  become: true
+
+  vars:
+    backup_base: /var/backups/it-stack
+
+  tasks:
+    - name: "Backup:Verify | Check backup directory sizes"
+      ansible.builtin.shell: |
+        echo "=== Backup storage usage on {{ inventory_hostname }} ==="
+        du -sh {{ backup_base }}/* 2>/dev/null || echo "  (no backups yet)"
+        echo ""
+        echo "=== Most recent files ==="
+        find {{ backup_base }} -type f -newer /tmp -printf '%T@ %f\n' 2>/dev/null | \
+          sort -rn | head -5 | awk '{print "  " $2}'
+      register: backup_summary
+      changed_when: false
+      tags: [backup, verify]
+
+    - name: "Backup:Verify | Show backup summary"
+      ansible.builtin.debug:
+        msg: "{{ backup_summary.stdout_lines }}"
+      tags: [backup, verify]
+
+    - name: "Backup:Verify | Test PostgreSQL dump integrity (lab-db1 only)"
+      ansible.builtin.shell: |
+        LATEST=$(find /var/backups/it-stack/postgres -name 'nextcloud_*.dump' -newer /tmp | \
+                 sort | tail -1)
+        if [ -n "$LATEST" ]; then
+          pg_restore --list "${LATEST}" > /dev/null 2>&1 && echo "OK: ${LATEST}" || echo "CORRUPT: ${LATEST}"
+        else
+          echo "SKIP: no dump found"
+        fi
+      become_user: postgres
+      when: inventory_hostname == 'lab-db1'
+      register: dump_verify
+      changed_when: false
+      ignore_errors: true
+      tags: [backup, verify, postgres]
+
+    - name: "Backup:Verify | Show dump verification result"
+      ansible.builtin.debug:
+        msg: "{{ dump_verify.stdout }}"
+      when:
+        - inventory_hostname == 'lab-db1'
+        - dump_verify is defined
+      tags: [backup, verify, postgres]

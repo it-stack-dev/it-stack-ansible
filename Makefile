@@ -160,3 +160,50 @@ vault-edit:
 ## vault-view   View vault secrets file (read-only)
 vault-view:
 	ansible-vault view --vault-password-file .vault_pass vault/secrets.yml
+
+## vault-init   Create vault/secrets.yml from example template (first-time setup)
+vault-init:
+	@if [ -f vault/secrets.yml ]; then \
+		echo "ERROR: vault/secrets.yml already exists. Use 'make vault-edit'."; exit 1; \
+	fi
+	cp vault/secrets.yml.example vault/secrets.yml
+	@echo "Edit vault/secrets.yml with real passwords, then run:"
+	@echo "  ansible-vault encrypt vault/secrets.yml --vault-password-file .vault_pass"
+
+# ── Production Readiness ──────────────────────────────────────────────────────
+
+## harden       Security hardening — SSH, fail2ban, UFW firewall, sysctl, auditd (all hosts)
+harden:
+	$(ANSIBLE) $(INVENTORY) $(VAULT_ARGS) playbooks/harden.yml
+
+## harden-check Dry-run security hardening (--check --diff, no changes)
+harden-check:
+	$(ANSIBLE) $(INVENTORY) $(VAULT_ARGS) --check --diff playbooks/harden.yml
+
+## tls          Create internal CA and deploy TLS certs to all hosts + Traefik
+tls:
+	$(ANSIBLE) $(INVENTORY) $(VAULT_ARGS) playbooks/tls-setup.yml
+
+## tls-ca       Set up internal CA on lab-proxy1 only
+tls-ca:
+	$(ANSIBLE) $(INVENTORY) $(VAULT_ARGS) --tags ca playbooks/tls-setup.yml
+
+## tls-certs    Generate and distribute host certificates (CA must exist first)
+tls-certs:
+	$(ANSIBLE) $(INVENTORY) $(VAULT_ARGS) --tags certs,distribute,traefik playbooks/tls-setup.yml
+
+## backup       Run immediate full backup (PostgreSQL + Nextcloud + configs)
+backup:
+	$(ANSIBLE) $(INVENTORY) $(VAULT_ARGS) playbooks/backup.yml
+
+## backup-setup Install nightly backup cron jobs on all servers
+backup-setup:
+	$(ANSIBLE) $(INVENTORY) $(VAULT_ARGS) --tags setup playbooks/backup.yml
+
+## backup-pg    PostgreSQL dump only
+backup-pg:
+	$(ANSIBLE) -i inventory/hosts.ini $(VAULT_ARGS) --limit database --tags postgres playbooks/backup.yml
+
+## backup-verify Verify backup archive integrity
+backup-verify:
+	$(ANSIBLE) $(INVENTORY) $(VAULT_ARGS) --tags verify playbooks/backup.yml

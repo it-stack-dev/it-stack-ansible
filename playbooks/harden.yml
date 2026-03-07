@@ -1,0 +1,348 @@
+---
+# playbooks/harden.yml
+#
+# Security hardening playbook — run AFTER initial service deployment.
+# Safe to run again at any time (fully idempotent).
+#
+# What this does:
+#   - SSH hardening (key-only auth, no root login, AllowGroups)
+#   - fail2ban configuration (SSH + service-specific jails)
+#   - UFW firewall — minimum required ports per server role
+#   - Kernel sysctl hardening (net.ipv4, kernel.*, fs.*)
+#   - Unattended security upgrades
+#   - Disable unused services
+#   - Authorize operator SSH public keys
+#
+# Usage:
+#   make harden
+#   ansible-playbook -i inventory/hosts.ini --vault-password-file .vault_pass playbooks/harden.yml
+#   ansible-playbook ... playbooks/harden.yml --tags firewall   # firewall rules only
+#   ansible-playbook ... playbooks/harden.yml --tags ssh        # SSH config only
+#   ansible-playbook ... playbooks/harden.yml --tags sysctl     # kernel params only
+#   ansible-playbook ... playbooks/harden.yml --limit lab-db1   # single host
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Play 1: Harden all servers
+# ─────────────────────────────────────────────────────────────────────────────
+- name: "Security hardening — all servers"
+  hosts: all
+  become: true
+  vars_files:
+    - ../vault/secrets.yml
+
+  vars:
+    # SSH authorized public keys — add operator keys here
+    ssh_authorized_keys: "{{ vault_ssh_authorized_keys | default([]) }}"
+
+    # Kernel hardening parameters (CIS-aligned)
+    sysctl_hardening:
+      # ── Network: IPv4 ──────────────────────────────────────────────────────
+      - { key: "net.ipv4.ip_forward",                         value: "0" }   # overridden on proxy1
+      - { key: "net.ipv4.conf.all.send_redirects",            value: "0" }
+      - { key: "net.ipv4.conf.default.send_redirects",        value: "0" }
+      - { key: "net.ipv4.conf.all.accept_redirects",          value: "0" }
+      - { key: "net.ipv4.conf.default.accept_redirects",      value: "0" }
+      - { key: "net.ipv4.conf.all.accept_source_route",       value: "0" }
+      - { key: "net.ipv4.conf.default.accept_source_route",   value: "0" }
+      - { key: "net.ipv4.conf.all.log_martians",              value: "1" }
+      - { key: "net.ipv4.conf.default.log_martians",          value: "1" }
+      - { key: "net.ipv4.icmp_echo_ignore_broadcasts",        value: "1" }
+      - { key: "net.ipv4.icmp_ignore_bogus_error_responses",  value: "1" }
+      - { key: "net.ipv4.tcp_syncookies",                     value: "1" }
+      - { key: "net.ipv4.conf.all.rp_filter",                 value: "1" }
+      - { key: "net.ipv4.conf.default.rp_filter",             value: "1" }
+      # ── Network: IPv6 ──────────────────────────────────────────────────────
+      - { key: "net.ipv6.conf.all.disable_ipv6",              value: "1" }
+      - { key: "net.ipv6.conf.default.disable_ipv6",          value: "1" }
+      - { key: "net.ipv6.conf.lo.disable_ipv6",               value: "1" }
+      # ── Kernel ─────────────────────────────────────────────────────────────
+      - { key: "kernel.randomize_va_space",                   value: "2" }
+      - { key: "kernel.dmesg_restrict",                       value: "1" }
+      - { key: "kernel.kptr_restrict",                        value: "2" }
+      - { key: "kernel.yama.ptrace_scope",                    value: "1" }
+      - { key: "kernel.perf_event_paranoid",                  value: "3" }
+      - { key: "kernel.unprivileged_bpf_disabled",            value: "1" }
+      - { key: "kernel.sysrq",                                value: "0" }
+      # ── Filesystem ─────────────────────────────────────────────────────────
+      - { key: "fs.protected_hardlinks",                      value: "1" }
+      - { key: "fs.protected_symlinks",                       value: "1" }
+      - { key: "fs.suid_dumpable",                            value: "0" }
+      # ── Memory ─────────────────────────────────────────────────────────────
+      - { key: "vm.swappiness",                               value: "10" }
+      - { key: "vm.dirty_ratio",                              value: "15" }
+      - { key: "vm.dirty_background_ratio",                   value: "5" }
+
+  tasks:
+    # ── SSH authorized keys ─────────────────────────────────────────────────
+    - name: "SSH | Ensure .ssh directory exists for ansible user"
+      ansible.builtin.file:
+        path: "/home/{{ admin_user }}/.ssh"
+        state: directory
+        owner: "{{ admin_user }}"
+        group: "{{ admin_user }}"
+        mode: "0700"
+      tags: [ssh, keys]
+
+    - name: "SSH | Deploy authorized_keys for ansible user"
+      ansible.posix.authorized_key:
+        user: "{{ admin_user }}"
+        state: present
+        key: "{{ item }}"
+        exclusive: false
+      loop: "{{ ssh_authorized_keys }}"
+      when: ssh_authorized_keys | length > 0
+      tags: [ssh, keys]
+
+    # ── SSH hardening ───────────────────────────────────────────────────────
+    - name: "SSH | Deploy hardened sshd_config"
+      ansible.builtin.template:
+        src: "../roles/common/templates/sshd_config.j2"
+        dest: /etc/ssh/sshd_config
+        owner: root
+        group: root
+        mode: "0600"
+        validate: "/usr/sbin/sshd -t -f %s"
+      notify: restart sshd
+      tags: [ssh, hardening]
+
+    # ── fail2ban ────────────────────────────────────────────────────────────
+    - name: "fail2ban | Ensure installed"
+      ansible.builtin.apt:
+        name: fail2ban
+        state: present
+        update_cache: false
+      tags: [fail2ban, hardening]
+
+    - name: "fail2ban | Deploy jail.local"
+      ansible.builtin.template:
+        src: "../roles/common/templates/fail2ban-jail.local.j2"
+        dest: /etc/fail2ban/jail.local
+        owner: root
+        group: root
+        mode: "0644"
+      notify: restart fail2ban
+      tags: [fail2ban, hardening]
+
+    - name: "fail2ban | Ensure started and enabled"
+      ansible.builtin.systemd:
+        name: fail2ban
+        state: started
+        enabled: true
+      tags: fail2ban
+
+    # ── Kernel sysctl hardening ─────────────────────────────────────────────
+    - name: "Sysctl | Apply hardening parameters"
+      ansible.posix.sysctl:
+        name: "{{ item.key }}"
+        value: "{{ item.value }}"
+        sysctl_file: /etc/sysctl.d/99-it-stack-hardening.conf
+        reload: true
+        state: present
+      loop: "{{ sysctl_hardening }}"
+      tags: [sysctl, hardening]
+
+    # ── UFW firewall ────────────────────────────────────────────────────────
+    - name: "Firewall | Include firewall tasks"
+      ansible.builtin.include_tasks:
+        file: "../roles/common/tasks/firewall.yml"
+      tags: firewall
+
+    # ── Unattended upgrades ─────────────────────────────────────────────────
+    - name: "AutoUpdate | Install unattended-upgrades"
+      ansible.builtin.apt:
+        name:
+          - unattended-upgrades
+          - apt-listchanges
+        state: present
+      tags: [updates, hardening]
+
+    - name: "AutoUpdate | Enable automatic security upgrades"
+      ansible.builtin.copy:
+        dest: /etc/apt/apt.conf.d/20auto-upgrades
+        content: |
+          APT::Periodic::Update-Package-Lists "1";
+          APT::Periodic::Download-Upgradeable-Packages "1";
+          APT::Periodic::Unattended-Upgrade "1";
+          APT::Periodic::AutocleanInterval "7";
+        owner: root
+        group: root
+        mode: "0644"
+      tags: [updates, hardening]
+
+    # ── Kernel module restrictions ───────────────────────────────────────────
+    - name: "Modules | Disable uncommon network protocols"
+      ansible.builtin.copy:
+        dest: /etc/modprobe.d/it-stack-disable-modules.conf
+        content: |
+          # Disable uncommon/rarely needed network protocols (CIS hardening)
+          install dccp /bin/true
+          install sctp /bin/true
+          install rds  /bin/true
+          install tipc /bin/true
+          # Disable uncommon filesystems
+          install cramfs   /bin/true
+          install freevxfs /bin/true
+          install jffs2    /bin/true
+          install hfs      /bin/true
+          install hfsplus  /bin/true
+          install squashfs /bin/true
+          install udf      /bin/true
+        owner: root
+        group: root
+        mode: "0644"
+      tags: [modules, hardening]
+
+    # ── Disable root password ───────────────────────────────────────────────
+    - name: "Root | Lock root account password"
+      ansible.builtin.user:
+        name: root
+        password_lock: true
+      tags: [ssh, hardening]
+
+    # ── Disable unused services ─────────────────────────────────────────────
+    - name: "Services | Stop and disable snapd"
+      ansible.builtin.systemd:
+        name: snapd
+        state: stopped
+        enabled: false
+        masked: true
+      ignore_errors: true
+      tags: [services, hardening]
+
+    - name: "Services | Stop and disable multipathd"
+      ansible.builtin.systemd:
+        name: multipathd
+        state: stopped
+        enabled: false
+      ignore_errors: true
+      tags: [services, hardening]
+
+    # ── Audit logging ───────────────────────────────────────────────────────
+    - name: "Audit | Install auditd"
+      ansible.builtin.apt:
+        name:
+          - auditd
+          - audispd-plugins
+        state: present
+      tags: [audit, hardening]
+
+    - name: "Audit | Deploy audit rules (CIS-aligned)"
+      ansible.builtin.copy:
+        dest: /etc/audit/rules.d/99-it-stack.rules
+        content: |
+          # IT-Stack audit rules — CIS Linux Benchmark aligned
+          # Delete existing rules
+          -D
+          # Buffer size
+          -b 8192
+          # Failure mode: 1=log, 2=panic
+          -f 1
+
+          # --- Identity & auth changes ---
+          -w /etc/passwd -p wa -k identity
+          -w /etc/shadow -p wa -k identity
+          -w /etc/group  -p wa -k identity
+          -w /etc/gshadow -p wa -k identity
+          -w /etc/sudoers -p wa -k sudoers
+          -w /etc/sudoers.d/ -p wa -k sudoers
+
+          # --- SSH authorized keys ---
+          -w /root/.ssh -p wa -k ssh_keys
+          -w /home/ -p wa -k ssh_keys
+
+          # --- Privileged command use ---
+          -a always,exit -F arch=b64 -S execve -C uid!=euid -F euid=0 -k setuid
+          -a always,exit -F arch=b64 -S execve -C gid!=egid -F egid=0 -k setgid
+
+          # --- Kernel module loading ---
+          -w /sbin/insmod -p x -k modules
+          -w /sbin/rmmod  -p x -k modules
+          -w /sbin/modprobe -p x -k modules
+
+          # --- Cron jobs ---
+          -w /etc/cron.allow -p wa -k cron
+          -w /etc/cron.deny  -p wa -k cron
+          -w /etc/cron.d/    -p wa -k cron
+          -w /etc/crontab    -p wa -k cron
+
+          # --- Service configuration changes ---
+          -w /etc/systemd/system/ -p wa -k systemd
+
+          # Immutable (comment out during initial setup)
+          # -e 2
+        owner: root
+        group: root
+        mode: "0640"
+      notify: restart auditd
+      tags: [audit, hardening]
+
+    - name: "Audit | Ensure auditd started and enabled"
+      ansible.builtin.systemd:
+        name: auditd
+        state: started
+        enabled: true
+      tags: audit
+
+  handlers:
+    - name: restart sshd
+      ansible.builtin.systemd:
+        name: ssh
+        state: restarted
+
+    - name: restart fail2ban
+      ansible.builtin.systemd:
+        name: fail2ban
+        state: restarted
+
+    - name: reload ufw
+      ansible.builtin.command: ufw reload
+      changed_when: true
+
+    - name: restart auditd
+      ansible.builtin.systemd:
+        name: auditd
+        state: restarted
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Play 2: Enable IP forwarding on the reverse proxy (Traefik needs it)
+# ─────────────────────────────────────────────────────────────────────────────
+- name: "Harden proxy — enable IP forwarding for Traefik reverse proxy"
+  hosts: proxy
+  become: true
+
+  tasks:
+    - name: "Proxy | Enable IPv4 forwarding (needed for Traefik / NAT)"
+      ansible.posix.sysctl:
+        name: net.ipv4.ip_forward
+        value: "1"
+        sysctl_file: /etc/sysctl.d/99-it-stack-hardening.conf
+        reload: true
+        state: present
+      tags: [sysctl, proxy]
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Play 3: PostgreSQL-specific kernel tuning on lab-db1
+# ─────────────────────────────────────────────────────────────────────────────
+- name: "Harden database — PostgreSQL kernel tuning"
+  hosts: database
+  become: true
+
+  vars:
+    pg_sysctl:
+      - { key: "kernel.shmmax",          value: "17179869184" }   # 16 GB
+      - { key: "kernel.shmall",          value: "4194304" }
+      - { key: "kernel.shmmni",          value: "4096" }
+      - { key: "vm.nr_hugepages",        value: "1024" }          # 2 MB pages
+      - { key: "vm.overcommit_memory",   value: "2" }
+      - { key: "vm.overcommit_ratio",    value: "90" }
+
+  tasks:
+    - name: "DB | Apply PostgreSQL kernel parameters"
+      ansible.posix.sysctl:
+        name: "{{ item.key }}"
+        value: "{{ item.value }}"
+        sysctl_file: /etc/sysctl.d/98-it-stack-postgresql.conf
+        reload: true
+        state: present
+      loop: "{{ pg_sysctl }}"
+      tags: [sysctl, database, postgresql]
