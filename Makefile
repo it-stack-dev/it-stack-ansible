@@ -10,7 +10,11 @@ VAULT_ARGS    := --vault-password-file .vault_pass
         deploy-taiga deploy-snipeit deploy-glpi deploy-zabbix deploy-graylog \
         deploy-phase2 deploy-phase3 deploy-phase4 \
         deploy-1node deploy-2node deploy-3node deploy-4node deploy-5node \
-        ping facts vault-edit vault-view
+        ping facts vault-edit vault-view \
+        harden harden-check tls tls-ca tls-certs \
+        backup backup-setup backup-pg backup-verify \
+        test-restore test-restore-pg test-restore-nc \
+        scan scan-images
 
 ## help         Show this help
 help:
@@ -207,3 +211,25 @@ backup-pg:
 ## backup-verify Verify backup archive integrity
 backup-verify:
 	$(ANSIBLE) $(INVENTORY) $(VAULT_ARGS) --tags verify playbooks/backup.yml
+
+## test-restore  Full restoration test: PostgreSQL + Nextcloud + configs (RPO/RTO validation)
+test-restore:
+	$(ANSIBLE) $(INVENTORY) $(VAULT_ARGS) playbooks/test-restore.yml
+
+## test-restore-pg   PostgreSQL restoration test only
+test-restore-pg:
+	$(ANSIBLE) $(INVENTORY) $(VAULT_ARGS) --tags postgres playbooks/test-restore.yml
+
+## test-restore-nc   Nextcloud restoration test only
+test-restore-nc:
+	$(ANSIBLE) $(INVENTORY) $(VAULT_ARGS) --tags nextcloud playbooks/test-restore.yml
+
+# ── Security Scanning ─────────────────────────────────────────────────────────
+
+## scan          Run Trivy locally against all role templates and docker-compose files
+scan:
+	trivy fs . --severity CRITICAL,HIGH --exit-code 1 --config trivy.yaml
+
+## scan-images   Trivy scan a specific image (IMAGE=name:tag)
+scan-images:
+	trivy image --severity CRITICAL,HIGH --exit-code 1 $(IMAGE)

@@ -1,0 +1,159 @@
+---
+# .github/workflows/trivy.yml
+#
+# Trivy security scan — runs on every push/PR and on a daily schedule.
+# Scans docker-compose files and any Dockerfiles for known CVEs.
+# Fails the build on CRITICAL vulnerabilities; reports HIGH as warnings.
+#
+# Results uploaded to GitHub Security → Code scanning alerts.
+
+name: Trivy Security Scan
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+  schedule:
+    # Daily at 06:00 UTC — catches newly published CVEs in existing images
+    - cron: '0 6 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  security-events: write   # required to upload SARIF to GitHub Security
+
+jobs:
+  # ── Job 1: Scan Ansible role templates for hardcoded secrets ───────────────
+  secret-scan:
+    name: Secret Detection (Gitleaks)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Run Gitleaks secret scan
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          args: detect --source . --no-git --redact --exit-code 1
+
+  # ── Job 2: Lint Ansible playbooks ─────────────────────────────────────────
+  ansible-lint:
+    name: Ansible Lint
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install ansible-lint
+        run: pip install ansible-lint
+
+      - name: Run ansible-lint
+        run: ansible-lint playbooks/ roles/
+        continue-on-error: false
+
+  # ── Job 3: Trivy — scan container images referenced in docker-compose files ─
+  trivy-images:
+    name: Trivy Image Scan
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # Pull images from each phase's compose reference
+        image:
+          - { name: "freeipa/freeipa-server:fedora-41",         label: "freeipa" }
+          - { name: "quay.io/keycloak/keycloak:26",             label: "keycloak" }
+          - { name: "postgres:16-alpine",                        label: "postgresql" }
+          - { name: "redis:7-alpine",                            label: "redis" }
+          - { name: "traefik:v3",                                label: "traefik" }
+          - { name: "nextcloud:30-apache",                       label: "nextcloud" }
+          - { name: "mattermost/mattermost-team-edition:9",     label: "mattermost" }
+          - { name: "jitsi/web:stable-9457",                    label: "jitsi" }
+          - { name: "iredmail/iredmail:stable",                  label: "iredmail" }
+          - { name: "zammad/zammad-docker-compose:latest",       label: "zammad" }
+          - { name: "docker.elastic.co/elasticsearch/elasticsearch:8.15.0", label: "elasticsearch" }
+          - { name: "flaviostutz/asterisk:latest",               label: "freepbx" }
+          - { name: "suitecrm/suitecrm:latest",                  label: "suitecrm" }
+          - { name: "odoo:17",                                   label: "odoo" }
+          - { name: "openkm/openkm:community",                   label: "openkm" }
+          - { name: "taigaio/taiga-front:latest",                label: "taiga" }
+          - { name: "snipe/snipe-it:latest",                     label: "snipeit" }
+          - { name: "glpi/glpi:latest",                          label: "glpi" }
+          - { name: "zabbix/zabbix-server-pgsql:ubuntu-7.0-latest", label: "zabbix" }
+          - { name: "graylog/graylog:6.0",                       label: "graylog" }
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Pull Docker image for scanning
+        run: docker pull ${{ matrix.image.name }} || true
+
+      - name: Run Trivy vulnerability scan
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: '${{ matrix.image.name }}'
+          format: 'sarif'
+          output: 'trivy-${{ matrix.image.label }}.sarif'
+          severity: 'CRITICAL,HIGH'
+          exit-code: '1'
+          ignore-unfixed: true
+          vuln-type: 'os,library'
+
+      - name: Upload Trivy SARIF to GitHub Security
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: 'trivy-${{ matrix.image.label }}.sarif'
+          category: 'trivy-${{ matrix.image.label }}'
+
+  # ── Job 4: Trivy — scan repo filesystem for misconfigurations ─────────────
+  trivy-fs:
+    name: Trivy Filesystem / Config Scan
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Run Trivy filesystem scan
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'fs'
+          scan-ref: '.'
+          format: 'sarif'
+          output: 'trivy-fs.sarif'
+          severity: 'CRITICAL,HIGH'
+          exit-code: '0'         # warn only — misconfigs should not block PRs
+          ignore-unfixed: true
+          trivy-config: trivy.yaml
+
+      - name: Upload filesystem scan results
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: 'trivy-fs.sarif'
+          category: 'trivy-filesystem'
+
+  # ── Job 5: Summary badge update (main branch only) ─────────────────────────
+  notify-results:
+    name: Notify Scan Results
+    runs-on: ubuntu-latest
+    needs: [secret-scan, ansible-lint, trivy-images, trivy-fs]
+    if: always() && github.ref == 'refs/heads/main'
+    steps:
+      - name: Post scan summary to job summary
+        run: |
+          echo "## Security Scan Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Job | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|-----|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Secret Detection | ${{ needs.secret-scan.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Ansible Lint | ${{ needs.ansible-lint.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Trivy Image Scan | ${{ needs.trivy-images.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Trivy FS Scan | ${{ needs.trivy-fs.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "See [Security tab](../../security/code-scanning) for details." >> $GITHUB_STEP_SUMMARY

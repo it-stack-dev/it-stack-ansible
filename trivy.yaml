@@ -1,0 +1,56 @@
+# trivy.yaml — Trivy configuration for IT-Stack ansible repo
+# Used by: .github/workflows/trivy.yml (trivy-fs job) and `make scan`
+# Docs: https://aquasecurity.github.io/trivy/latest/docs/references/configuration/config-file/
+
+scan:
+  # Scan all files including hidden directories
+  include-dev-deps: false
+
+severity:
+  - CRITICAL
+  - HIGH
+
+# Paths to scan
+scan-ref: "."
+
+# Skip these paths (test fixtures, examples, no real secrets)
+skip-files:
+  - "tests/**"
+  - "**/*.example"
+  - "**/*.sample"
+
+skip-dirs:
+  - ".git"
+  - ".github"
+  - "inventory"   # contains only hostnames, no secrets
+
+# Secret scanning
+secret:
+  config: |
+    title: IT-Stack custom rules
+    rules:
+      - id: ansible-vault-plaintext
+        category: secret
+        title: Ansible plaintext vault password
+        severity: CRITICAL
+        regex: vault_password\s*[:=]\s*['"]\S{8,}['"]
+      - id: db-password-plain
+        category: secret
+        title: Plaintext database password in non-vault file
+        severity: HIGH
+        regex: db_pass(?:word)?\s*[:=]\s*['"]\S{8,}['"]
+        exclude-block:
+          - '.*vault_.*'
+          - '.*\{\{.*\}\}.*'
+
+# Misconfig scanning
+misconfiguration:
+  include-non-failures: false
+
+# Output
+format: table
+exit-code: 1
+
+# Cache
+cache:
+  dir: /tmp/.trivy-cache
