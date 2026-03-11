@@ -1,0 +1,36 @@
+# /etc/krb5.conf
+# Managed by Ansible — roles/freeipa/templates/krb5.conf.j2
+
+[libdefaults]
+    default_realm = {{ freeipa_realm }}
+    dns_lookup_realm = true
+    dns_lookup_kdc = true
+    ticket_lifetime = 24h
+    renew_lifetime = 7d
+    forwardable = true
+    rdns = false
+    pkinit_anchors = FILE:/etc/ipa/ca.crt
+
+[realms]
+    {{ freeipa_realm }} = {
+        kdc = {{ freeipa_server_fqdn }}:88
+        master_kdc = {{ freeipa_server_fqdn }}:88
+        admin_server = {{ freeipa_server_fqdn }}:749
+        kpasswd_server = {{ freeipa_server_fqdn }}:464
+        default_domain = {{ freeipa_domain }}
+        pkinit_anchors = FILE:/etc/ipa/ca.crt
+    }
+
+[domain_realm]
+    .{{ freeipa_domain }} = {{ freeipa_realm }}
+    {{ freeipa_domain }} = {{ freeipa_realm }}
+
+[dbmodules]
+    {{ freeipa_realm }} = {
+        db_library = ipadb.so
+    }
+
+[logging]
+    default = FILE:/var/log/krb5libs.log
+    kdc = FILE:/var/log/krb5kdc.log
+    admin_server = FILE:/var/log/kadmind.log

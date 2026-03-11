@@ -1,0 +1,142 @@
+---
+# roles/freeipa/tasks/kerberos-service-principals.yml
+#
+# Creates Kerberos service principals in FreeIPA for all IT-Stack services
+# and generates keytabs for services that require Kerberos authentication
+# (e.g., internal service-to-service auth, NFS, IMAP, SMTP).
+#
+# Service principal format:  SERVICE/fqdn@REALM
+# Keytab output path:        /etc/krb5.keytabs/{service}-{host}.keytab
+#
+# Variables (roles/freeipa/defaults/main.yml):
+#   freeipa_realm              — e.g. INTERNAL.EXAMPLE.COM
+#   freeipa_domain             — e.g. internal.example.com
+#   freeipa_kerberos_principals — list, defined in defaults
+#   vault_ipa_admin_pass       — Ansible Vault
+
+- name: "Obtain Kerberos ticket (kinit as admin)"
+  ansible.builtin.command:
+    cmd: "echo '{{ vault_ipa_admin_pass }}' | kinit admin@{{ freeipa_realm }}"
+  changed_when: false
+  no_log: true
+
+- name: "Create /etc/krb5.keytabs directory"
+  ansible.builtin.file:
+    path: /etc/krb5.keytabs
+    state: directory
+    owner: root
+    group: root
+    mode: "0750"
+
+# ── Create service principals ─────────────────────────────────────────────────
+
+- name: "Add Kerberos service principals in FreeIPA"
+  ansible.builtin.command:
+    cmd: >-
+      ipa service-add
+      {{ item.service }}/{{ item.host }}.{{ freeipa_domain }}@{{ freeipa_realm }}
+      --force
+  loop: "{{ freeipa_kerberos_principals }}"
+  loop_control:
+    label: "{{ item.service }}/{{ item.host }}"
+  register: ipa_service_add
+  # rc=1 with "already exists" is not an error
+  failed_when: >
+    ipa_service_add.rc != 0 and
+    'already exists' not in ipa_service_add.stderr
+
+- name: "Allow service hosts to retrieve their own keytab"
+  ansible.builtin.command:
+    cmd: >-
+      ipa service-allow-retrieve-keytab
+      {{ item.service }}/{{ item.host }}.{{ freeipa_domain }}@{{ freeipa_realm }}
+      --hosts={{ item.host }}.{{ freeipa_domain }}
+  loop: "{{ freeipa_kerberos_principals }}"
+  loop_control:
+    label: "{{ item.service }}/{{ item.host }}"
+  register: ipa_keytab_allow
+  failed_when: >
+    ipa_keytab_allow.rc != 0 and
+    'already a member' not in ipa_keytab_allow.stderr
+
+# ── Extract keytabs ───────────────────────────────────────────────────────────
+
+- name: "Export keytabs for services that need them"
+  ansible.builtin.command:
+    cmd: >-
+      ipa-getkeytab
+      -s {{ freeipa_server_fqdn }}
+      -p {{ item.service }}/{{ item.host }}.{{ freeipa_domain }}@{{ freeipa_realm }}
+      -k /etc/krb5.keytabs/{{ item.service }}-{{ item.host }}.keytab
+  loop: "{{ freeipa_kerberos_principals }}"
+  loop_control:
+    label: "{{ item.service }}/{{ item.host }}"
+  args:
+    creates: "/etc/krb5.keytabs/{{ item.service }}-{{ item.host }}.keytab"
+  when: item.export_keytab | default(true) | bool
+  register: ipa_getkeytab
+
+- name: "Set restrictive permissions on keytab files"
+  ansible.builtin.file:
+    path: "/etc/krb5.keytabs/{{ item.service }}-{{ item.host }}.keytab"
+    owner: "{{ item.owner | default('root') }}"
+    group: "{{ item.group | default('root') }}"
+    mode: "{{ item.mode | default('0640') }}"
+  loop: "{{ freeipa_kerberos_principals }}"
+  loop_control:
+    label: "{{ item.service }}/{{ item.host }}"
+  when: item.export_keytab | default(true) | bool
+
+# ── HTTP service principals (web SSO / SPNEGO) ────────────────────────────────
+
+- name: "Create HTTP principals for web service Kerberos SSO (SPNEGO)"
+  ansible.builtin.command:
+    cmd: >-
+      ipa service-add
+      HTTP/{{ item }}.{{ freeipa_domain }}@{{ freeipa_realm }}
+      --force
+  loop: "{{ freeipa_http_hosts | default([]) }}"
+  loop_control:
+    label: "HTTP/{{ item }}"
+  register: ipa_http_add
+  failed_when: >
+    ipa_http_add.rc != 0 and
+    'already exists' not in ipa_http_add.stderr
+
+# ── DNS SRV record for Kerberos ───────────────────────────────────────────────
+
+- name: "Ensure _kerberos TXT record is present in DNS"
+  ansible.builtin.command:
+    cmd: >-
+      ipa dnsrecord-add {{ freeipa_domain }} _kerberos
+      --txt-rec="{{ freeipa_realm }}"
+  register: ipa_kerberos_txt
+  failed_when: >
+    ipa_kerberos_txt.rc != 0 and
+    'already exists' not in ipa_kerberos_txt.stderr
+  when: freeipa_manage_dns_kerberos | default(true) | bool
+
+# ── krb5.conf distribution ────────────────────────────────────────────────────
+
+- name: "Deploy /etc/krb5.conf to FreeIPA server"
+  ansible.builtin.template:
+    src: krb5.conf.j2
+    dest: /etc/krb5.conf
+    owner: root
+    group: root
+    mode: "0644"
+
+# ── Destroy admin ticket ──────────────────────────────────────────────────────
+
+- name: "Destroy admin Kerberos ticket (kdestroy)"
+  ansible.builtin.command:
+    cmd: kdestroy
+  changed_when: false
+
+- name: "Summary: Kerberos principals provisioned"
+  ansible.builtin.debug:
+    msg: >-
+      Created {{ freeipa_kerberos_principals | length }} Kerberos service principals
+      in realm {{ freeipa_realm }}.
+      Keytabs written to /etc/krb5.keytabs/.
+      HTTP/SPNEGO principals: {{ freeipa_http_hosts | default([]) | join(', ') }}.

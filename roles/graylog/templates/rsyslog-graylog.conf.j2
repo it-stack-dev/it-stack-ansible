@@ -1,0 +1,24 @@
+# /etc/rsyslog.d/60-graylog.conf
+# Managed by Ansible — roles/graylog/templates/rsyslog-graylog.conf.j2
+# Forwards all syslog messages to the Graylog Syslog UDP input.
+
+# Load the omfwd module (usually already loaded, harmless to repeat)
+module(load="omfwd")
+
+# Forward everything to Graylog Syslog UDP input
+*.* action(
+    type="omfwd"
+    Target="{{ graylog_hostname }}"
+    Port="{{ graylog_inputs | selectattr('title', 'equalto', 'Syslog UDP') | map(attribute='port') | first | default(1514) }}"
+    Protocol="udp"
+    Template="RSYSLOG_SyslogProtocol23Format"
+    queue.type="LinkedList"
+    queue.size="10000"
+    queue.filename="graylog-fwd-q"
+    queue.highwatermark="9000"
+    queue.lowwatermark="200"
+    queue.maxdiskspace="500m"
+    queue.saveonshutdown="on"
+    action.resumeRetryCount="-1"
+    action.resumeInterval="10"
+)

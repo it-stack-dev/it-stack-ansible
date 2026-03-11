@@ -8,3 +8,8 @@
 - name: "Import zabbix configuration tasks"
   ansible.builtin.import_tasks: configure.yml
   tags: [zabbix, configure]
+
+- name: "Register all IT-Stack servers as Zabbix monitored hosts"
+  ansible.builtin.import_tasks: register-hosts.yml
+  tags: [zabbix, monitoring, register-hosts]
+  when: zabbix_register_hosts | default(true) | bool

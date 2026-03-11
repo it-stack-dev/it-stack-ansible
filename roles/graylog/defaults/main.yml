@@ -33,3 +33,44 @@ graylog_firewall_ports:
   - { port: "1514",  proto: udp, from: "10.0.50.0/24" }
   - { port: "12201", proto: udp, from: "10.0.50.0/24" }
   - { port: "12202", proto: tcp, from: "10.0.50.0/24" }
+
+# Control flags for configure-inputs.yml
+graylog_configure_inputs:      true
+graylog_configure_retention:   true
+graylog_deploy_rsyslog_forwarder: false   # set true on non-Graylog nodes
+graylog_retention_indices:     30         # keep 30 index shards (~30 days)
+
+# Log streams — one per IT-Stack service category
+graylog_streams:
+  - title: "Identity & Security"
+    description: "FreeIPA (LDAP/Kerberos/DNS) + Keycloak (SSO/OIDC/SAML)"
+    rules:
+      - { field: "source", value: "lab-id1",   type: 6, inverted: false }
+  - title: "Database Layer"
+    description: "PostgreSQL + Redis + Elasticsearch"
+    rules:
+      - { field: "source", value: "lab-db1",   type: 6, inverted: false }
+  - title: "Collaboration"
+    description: "Nextcloud + Mattermost + Jitsi"
+    rules:
+      - { field: "source", value: "lab-app1",  type: 6, inverted: false }
+  - title: "Communications"
+    description: "iRedMail + Zammad + Zabbix"
+    rules:
+      - { field: "source", value: "lab-comm1", type: 6, inverted: false }
+  - title: "Reverse Proxy & Logs"
+    description: "Traefik + Graylog"
+    rules:
+      - { field: "source", value: "lab-proxy1", type: 6, inverted: false }
+  - title: "VoIP"
+    description: "FreePBX / Asterisk"
+    rules:
+      - { field: "source", value: "lab-pbx1",  type: 6, inverted: false }
+  - title: "Business Systems"
+    description: "SuiteCRM + Odoo + OpenKM"
+    rules:
+      - { field: "source", value: "lab-biz1",  type: 6, inverted: false }
+  - title: "IT Management"
+    description: "Taiga + Snipe-IT + GLPI"
+    rules:
+      - { field: "source", value: "lab-mgmt1", type: 6, inverted: false }

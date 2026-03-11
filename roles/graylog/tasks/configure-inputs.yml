@@ -1,0 +1,229 @@
+---
+# roles/graylog/tasks/configure-inputs.yml
+#
+# Creates Syslog and GELF inputs in Graylog via the REST API so all
+# 20 IT-Stack services can ship logs centrally.
+#
+# Input types configured (from graylog_inputs in defaults/main.yml):
+#   - Syslog UDP  port 1514   — rsyslog forwarding from all 8 servers
+#   - GELF UDP    port 12201  — structured app logs (Docker / direct)
+#   - GELF HTTP   port 12202  — HTTP-based log ingestion
+#
+# Prerequisites:
+#   - configure.yml already ran (Graylog is up and /api is reachable)
+#   - vault_graylog_admin_pass set in Ansible Vault
+
+- name: "Ensure Graylog API is ready"
+  ansible.builtin.uri:
+    url: "http://localhost:{{ graylog_http_port }}/api"
+    method: GET
+    user: admin
+    password: "{{ vault_graylog_admin_pass }}"
+    force_basic_auth: true
+    status_code: 200
+  register: graylog_api_check
+  retries: 18
+  delay: 10
+  until: graylog_api_check.status == 200
+
+# ── Retrieve existing inputs to avoid duplicates ─────────────────────────────
+
+- name: "GET existing Graylog inputs"
+  ansible.builtin.uri:
+    url: "http://localhost:{{ graylog_http_port }}/api/system/inputs"
+    method: GET
+    user: admin
+    password: "{{ vault_graylog_admin_pass }}"
+    force_basic_auth: true
+    headers:
+      X-Requested-By: "ansible"
+    status_code: 200
+  register: graylog_existing_inputs
+
+- name: "Build set of already-configured input titles"
+  ansible.builtin.set_fact:
+    graylog_existing_titles: >-
+      {{
+        graylog_existing_inputs.json.inputs
+        | map(attribute='title')
+        | list
+      }}
+
+# ── Create each defined input ─────────────────────────────────────────────────
+
+- name: "Create Graylog inputs"
+  ansible.builtin.uri:
+    url: "http://localhost:{{ graylog_http_port }}/api/system/inputs"
+    method: POST
+    user: admin
+    password: "{{ vault_graylog_admin_pass }}"
+    force_basic_auth: true
+    headers:
+      Content-Type: "application/json"
+      X-Requested-By: "ansible"
+    body_format: json
+    body:
+      title: "{{ item.title }}"
+      type: "{{ item.type }}"
+      global: true
+      configuration:
+        port: "{{ item.port }}"
+        bind_address: "0.0.0.0"
+        recv_buffer_size: 1048576
+        number_worker_threads: 2
+        override_source: ""
+        force_rdns: false
+        allow_override_date: true
+        store_full_message: "{{ item.store_full | default(false) }}"
+        expand_structured_data: "{{ item.expand_structured | default(false) }}"
+        decompress_size_limit: 8388608
+    status_code: [201, 200]
+  loop: "{{ graylog_inputs }}"
+  loop_control:
+    label: "{{ item.title }}"
+  when: item.title not in graylog_existing_titles
+  register: graylog_input_create
+
+- name: "Report created inputs"
+  ansible.builtin.debug:
+    msg: "Created Graylog input '{{ item.item.title }}' on port {{ item.item.port }}"
+  loop: "{{ graylog_input_create.results }}"
+  loop_control:
+    label: "{{ item.item.title }}"
+  when: item is not skipped
+
+# ── Syslog forwarding config snippet for all servers ─────────────────────────
+
+- name: "Deploy rsyslog forwarding configuration to /etc/rsyslog.d/"
+  ansible.builtin.template:
+    src: rsyslog-graylog.conf.j2
+    dest: /etc/rsyslog.d/60-graylog.conf
+    owner: root
+    group: root
+    mode: "0644"
+  notify: restart rsyslog
+  when: graylog_deploy_rsyslog_forwarder | default(false) | bool
+
+# ── Streams: one stream per IT-Stack service category ────────────────────────
+
+- name: "GET existing Graylog streams"
+  ansible.builtin.uri:
+    url: "http://localhost:{{ graylog_http_port }}/api/streams"
+    method: GET
+    user: admin
+    password: "{{ vault_graylog_admin_pass }}"
+    force_basic_auth: true
+    headers:
+      X-Requested-By: "ansible"
+    status_code: 200
+  register: graylog_existing_streams
+
+- name: "Build set of already-configured stream titles"
+  ansible.builtin.set_fact:
+    graylog_existing_stream_titles: >-
+      {{
+        graylog_existing_streams.json.streams
+        | map(attribute='title')
+        | list
+      }}
+
+- name: "Create IT-Stack log streams"
+  ansible.builtin.uri:
+    url: "http://localhost:{{ graylog_http_port }}/api/streams"
+    method: POST
+    user: admin
+    password: "{{ vault_graylog_admin_pass }}"
+    force_basic_auth: true
+    headers:
+      Content-Type: "application/json"
+      X-Requested-By: "ansible"
+    body_format: json
+    body:
+      title: "{{ item.title }}"
+      description: "{{ item.description }}"
+      index_set_id: "{{ graylog_default_index_set_id | default('') }}"
+      remove_matches_from_default_stream: false
+      matching_type: "OR"
+      rules: "{{ item.rules }}"
+    status_code: [201, 200]
+  loop: "{{ graylog_streams }}"
+  loop_control:
+    label: "{{ item.title }}"
+  when: item.title not in graylog_existing_stream_titles
+  register: graylog_stream_create
+
+- name: "Start newly created streams"
+  ansible.builtin.uri:
+    url: "http://localhost:{{ graylog_http_port }}/api/streams/{{ item.json.stream_id }}/resume"
+    method: POST
+    user: admin
+    password: "{{ vault_graylog_admin_pass }}"
+    force_basic_auth: true
+    headers:
+      X-Requested-By: "ansible"
+      Content-Length: "0"
+    status_code: [200, 204]
+  loop: "{{ graylog_stream_create.results }}"
+  loop_control:
+    label: "{{ item.item.title }}"
+  when:
+    - item is not skipped
+    - item.json.stream_id is defined
+
+# ── Retention policy (index rotation) ─────────────────────────────────────────
+
+- name: "GET default index set"
+  ansible.builtin.uri:
+    url: "http://localhost:{{ graylog_http_port }}/api/system/indices/index_sets?stats=false"
+    method: GET
+    user: admin
+    password: "{{ vault_graylog_admin_pass }}"
+    force_basic_auth: true
+    headers:
+      X-Requested-By: "ansible"
+    status_code: 200
+  register: graylog_index_sets
+
+- name: "Set default index-set ID fact"
+  ansible.builtin.set_fact:
+    graylog_default_index_set_id: >-
+      {{
+        graylog_index_sets.json.index_sets
+        | selectattr('default', 'equalto', true)
+        | map(attribute='id')
+        | first
+      }}
+
+- name: "Update default index set retention settings"
+  ansible.builtin.uri:
+    url: "http://localhost:{{ graylog_http_port }}/api/system/indices/index_sets/{{ graylog_default_index_set_id }}"
+    method: PUT
+    user: admin
+    password: "{{ vault_graylog_admin_pass }}"
+    force_basic_auth: true
+    headers:
+      Content-Type: "application/json"
+      X-Requested-By: "ansible"
+    body_format: json
+    body:
+      rotation_strategy_class: "org.graylog2.indexer.rotation.strategies.MessageCountRotationStrategy"
+      rotation_strategy:
+        type: "org.graylog2.indexer.rotation.strategies.MessageCountRotationStrategyConfig"
+        max_docs_per_index: 20000000
+      retention_strategy_class: "org.graylog2.indexer.retention.strategies.DeletionRetentionStrategy"
+      retention_strategy:
+        type: "org.graylog2.indexer.retention.strategies.DeletionRetentionStrategyConfig"
+        max_number_of_indices: "{{ graylog_retention_indices | default(30) }}"
+      index_prefix: "graylog"
+      replicas: 0
+      shards: 4
+      field_type_refresh_interval: 5000
+    status_code: 200
+  when: graylog_configure_retention | default(true) | bool
+
+- name: "Summary: Graylog inputs and streams configured"
+  ansible.builtin.debug:
+    msg: >-
+      Graylog inputs active: Syslog UDP :1514, GELF UDP :12201, GELF HTTP :12202.
+      Streams created for {{ graylog_streams | length }} IT-Stack service categories.
+      Retention: {{ graylog_retention_indices | default(30) }} indices max.

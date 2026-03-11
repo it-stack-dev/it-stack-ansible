@@ -1,0 +1,351 @@
+---
+# roles/zabbix/tasks/register-hosts.yml
+#
+# Auto-register all 8 IT-Stack servers as monitored Zabbix hosts.
+# Creates host groups, assigns the "Linux by Zabbix agent" template,
+# and configures a Zabbix-agent2 interface on each host.
+#
+# Prerequisites:
+#   - Zabbix server is running and schema is imported (configure.yml done)
+#   - zabbix-agent2 installed on every target server (roles/common)
+#   - vault_zabbix_admin_pass set in Ansible Vault
+#
+# Variables (roles/zabbix/defaults/main.yml):
+#   zabbix_monitored_hosts  — list of {host, ip, group}
+#   zabbix_api_url          — defaults to http://localhost/zabbix
+
+- name: "Obtain Zabbix API authentication token"
+  ansible.builtin.uri:
+    url: "{{ zabbix_api_url }}/api_jsonrpc.php"
+    method: POST
+    body_format: json
+    headers:
+      Content-Type: "application/json"
+    body:
+      jsonrpc: "2.0"
+      method: "user.login"
+      params:
+        username: "Admin"
+        password: "{{ vault_zabbix_admin_pass }}"
+      id: 1
+    status_code: 200
+  register: zabbix_auth_response
+  no_log: true
+
+- name: "Set Zabbix auth token fact"
+  ansible.builtin.set_fact:
+    zabbix_auth_token: "{{ zabbix_auth_response.json.result }}"
+
+# ── Host Groups ──────────────────────────────────────────────────────────────
+
+- name: "Collect unique host group names"
+  ansible.builtin.set_fact:
+    zabbix_unique_groups: "{{ zabbix_monitored_hosts | map(attribute='group') | unique | list }}"
+
+- name: "Create Zabbix host groups"
+  ansible.builtin.uri:
+    url: "{{ zabbix_api_url }}/api_jsonrpc.php"
+    method: POST
+    body_format: json
+    headers:
+      Content-Type: "application/json"
+    body:
+      jsonrpc: "2.0"
+      method: "hostgroup.create"
+      params:
+        name: "{{ item }}"
+      auth: "{{ zabbix_auth_token }}"
+      id: 2
+    status_code: 200
+  loop: "{{ zabbix_unique_groups }}"
+  register: zabbix_group_create
+  # ignore errors — group may already exist (error code -32602 / 32602)
+  failed_when: >
+    zabbix_group_create.json.error is defined and
+    zabbix_group_create.json.error.data is not search('already exist')
+
+- name: "Fetch all host group IDs"
+  ansible.builtin.uri:
+    url: "{{ zabbix_api_url }}/api_jsonrpc.php"
+    method: POST
+    body_format: json
+    headers:
+      Content-Type: "application/json"
+    body:
+      jsonrpc: "2.0"
+      method: "hostgroup.get"
+      params:
+        output: ["groupid", "name"]
+        filter:
+          name: "{{ zabbix_unique_groups }}"
+      auth: "{{ zabbix_auth_token }}"
+      id: 3
+    status_code: 200
+  register: zabbix_groups_fetched
+
+- name: "Build group name → ID lookup"
+  ansible.builtin.set_fact:
+    zabbix_group_map: >-
+      {{
+        zabbix_groups_fetched.json.result
+        | items2dict(key_name='name', value_name='groupid')
+      }}
+
+# ── Template lookup ──────────────────────────────────────────────────────────
+
+- name: "Fetch 'Linux by Zabbix agent' template ID"
+  ansible.builtin.uri:
+    url: "{{ zabbix_api_url }}/api_jsonrpc.php"
+    method: POST
+    body_format: json
+    headers:
+      Content-Type: "application/json"
+    body:
+      jsonrpc: "2.0"
+      method: "template.get"
+      params:
+        output: ["templateid", "name"]
+        filter:
+          name: "Linux by Zabbix agent"
+      auth: "{{ zabbix_auth_token }}"
+      id: 4
+    status_code: 200
+  register: zabbix_template_fetch
+
+- name: "Set Linux template ID fact"
+  ansible.builtin.set_fact:
+    zabbix_linux_template_id: "{{ zabbix_template_fetch.json.result[0].templateid }}"
+
+# ── Register/update each monitored host ─────────────────────────────────────
+
+- name: "Check if each host already exists in Zabbix"
+  ansible.builtin.uri:
+    url: "{{ zabbix_api_url }}/api_jsonrpc.php"
+    method: POST
+    body_format: json
+    headers:
+      Content-Type: "application/json"
+    body:
+      jsonrpc: "2.0"
+      method: "host.get"
+      params:
+        output: ["hostid", "host"]
+        filter:
+          host: "{{ item.host }}"
+      auth: "{{ zabbix_auth_token }}"
+      id: 5
+    status_code: 200
+  loop: "{{ zabbix_monitored_hosts }}"
+  loop_control:
+    label: "{{ item.host }}"
+  register: zabbix_host_check
+
+- name: "Create Zabbix hosts that do not yet exist"
+  ansible.builtin.uri:
+    url: "{{ zabbix_api_url }}/api_jsonrpc.php"
+    method: POST
+    body_format: json
+    headers:
+      Content-Type: "application/json"
+    body:
+      jsonrpc: "2.0"
+      method: "host.create"
+      params:
+        host: "{{ item.item.host }}"
+        name: "{{ item.item.host }} ({{ item.item.group }})"
+        interfaces:
+          - type: 1          # Zabbix agent
+            main: 1
+            useip: 1
+            ip: "{{ item.item.ip }}"
+            dns: ""
+            port: "{{ zabbix_agent_port }}"
+        groups:
+          - groupid: "{{ zabbix_group_map[item.item.group] }}"
+        templates:
+          - templateid: "{{ zabbix_linux_template_id }}"
+        description: "IT-Stack node — {{ item.item.group }} tier"
+        inventory_mode: 1   # automatic
+      auth: "{{ zabbix_auth_token }}"
+      id: 6
+    status_code: 200
+  loop: "{{ zabbix_host_check.results }}"
+  loop_control:
+    label: "{{ item.item.host }}"
+  # Only create when host.get returned 0 results
+  when: item.json.result | length == 0
+  register: zabbix_host_create
+
+- name: "Report registered hosts"
+  ansible.builtin.debug:
+    msg: >-
+      Host '{{ item.item.item.host }}' created with hostid
+      {{ item.json.result.hostids[0] }}
+  loop: "{{ zabbix_host_create.results }}"
+  loop_control:
+    label: "{{ item.item.item.host }}"
+  when:
+    - item is not skipped
+    - item.json.result is defined
+
+# ── Per-service checks via HTTP Agent template ───────────────────────────────
+
+- name: "Fetch 'HTTP Service Check' template ID (custom)"
+  ansible.builtin.uri:
+    url: "{{ zabbix_api_url }}/api_jsonrpc.php"
+    method: POST
+    body_format: json
+    headers:
+      Content-Type: "application/json"
+    body:
+      jsonrpc: "2.0"
+      method: "template.get"
+      params:
+        output: ["templateid", "name"]
+        filter:
+          name: "IT-Stack Service Checks"
+      auth: "{{ zabbix_auth_token }}"
+      id: 7
+    status_code: 200
+  register: zabbix_svc_template_fetch
+
+- name: "Create 'IT-Stack Service Checks' template if absent"
+  ansible.builtin.uri:
+    url: "{{ zabbix_api_url }}/api_jsonrpc.php"
+    method: POST
+    body_format: json
+    headers:
+      Content-Type: "application/json"
+    body:
+      jsonrpc: "2.0"
+      method: "template.create"
+      params:
+        host: "IT-Stack Service Checks"
+        name: "IT-Stack Service Checks"
+        description: >-
+          TCP/HTTP service-alive checks for all 20 IT-Stack services.
+          Created by it-stack-ansible register-hosts.yml.
+        groups:
+          - groupid: "1"   # "Templates" built-in group (groupid=1)
+      auth: "{{ zabbix_auth_token }}"
+      id: 8
+    status_code: 200
+  when: zabbix_svc_template_fetch.json.result | length == 0
+  register: zabbix_svc_template_create
+
+- name: "Set service-checks template ID"
+  ansible.builtin.set_fact:
+    zabbix_svc_template_id: >-
+      {{
+        (zabbix_svc_template_fetch.json.result | length > 0)
+        | ternary(
+            zabbix_svc_template_fetch.json.result[0].templateid,
+            zabbix_svc_template_create.json.result.templateids[0]
+          )
+      }}
+
+- name: "Add per-service TCP check items to IT-Stack Service Checks template"
+  ansible.builtin.uri:
+    url: "{{ zabbix_api_url }}/api_jsonrpc.php"
+    method: POST
+    body_format: json
+    headers:
+      Content-Type: "application/json"
+    body:
+      jsonrpc: "2.0"
+      method: "item.create"
+      params:
+        name: "Service port check: {{ item.name }} ({{ item.host }}:{{ item.port }})"
+        key_: "net.tcp.service[tcp,{{ item.host }},{{ item.port }}]"
+        hostid: "{{ zabbix_svc_template_id }}"
+        type: 0           # Zabbix agent
+        value_type: 3     # Numeric unsigned
+        delay: "60s"
+        history: "7d"
+        trends: "90d"
+        description: "{{ item.desc | default(item.name + ' TCP port reachability') }}"
+        tags:
+          - tag: it-stack-service
+            value: "{{ item.name | lower | replace(' ', '-') }}"
+      auth: "{{ zabbix_auth_token }}"
+      id: 9
+    status_code: 200
+  loop: "{{ zabbix_service_checks }}"
+  loop_control:
+    label: "{{ item.name }}"
+  failed_when: >
+    zabbix_item_create.json.error is defined and
+    zabbix_item_create.json.error.data is not search('already exist')
+  register: zabbix_item_create
+
+# ── Apply service-checks template to all hosts ───────────────────────────────
+
+- name: "Re-fetch all registered host IDs"
+  ansible.builtin.uri:
+    url: "{{ zabbix_api_url }}/api_jsonrpc.php"
+    method: POST
+    body_format: json
+    headers:
+      Content-Type: "application/json"
+    body:
+      jsonrpc: "2.0"
+      method: "host.get"
+      params:
+        output: ["hostid", "host"]
+        filter:
+          host: "{{ zabbix_monitored_hosts | map(attribute='host') | list }}"
+      auth: "{{ zabbix_auth_token }}"
+      id: 10
+    status_code: 200
+  register: zabbix_all_hosts
+
+- name: "Link IT-Stack Service Checks template to all hosts"
+  ansible.builtin.uri:
+    url: "{{ zabbix_api_url }}/api_jsonrpc.php"
+    method: POST
+    body_format: json
+    headers:
+      Content-Type: "application/json"
+    body:
+      jsonrpc: "2.0"
+      method: "host.massadd"
+      params:
+        hosts:
+          - hostid: "{{ item.hostid }}"
+        templates:
+          - templateid: "{{ zabbix_svc_template_id }}"
+      auth: "{{ zabbix_auth_token }}"
+      id: 11
+    status_code: 200
+  loop: "{{ zabbix_all_hosts.json.result }}"
+  loop_control:
+    label: "{{ item.host }}"
+  failed_when: >
+    zabbix_massadd.json.error is defined and
+    zabbix_massadd.json.error.data is not search('already')
+  register: zabbix_massadd
+
+# ── Logout ───────────────────────────────────────────────────────────────────
+
+- name: "Logout from Zabbix API"
+  ansible.builtin.uri:
+    url: "{{ zabbix_api_url }}/api_jsonrpc.php"
+    method: POST
+    body_format: json
+    headers:
+      Content-Type: "application/json"
+    body:
+      jsonrpc: "2.0"
+      method: "user.logout"
+      params: []
+      auth: "{{ zabbix_auth_token }}"
+      id: 99
+    status_code: 200
+  no_log: true
+
+- name: "Summary: Zabbix host registration complete"
+  ansible.builtin.debug:
+    msg: >-
+      Registered {{ zabbix_monitored_hosts | length }} hosts in Zabbix.
+      Host groups: {{ zabbix_unique_groups | join(', ') }}.
+      Service-checks template applied to all hosts.

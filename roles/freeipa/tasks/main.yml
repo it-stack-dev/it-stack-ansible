@@ -14,6 +14,11 @@
   tags: [freeipa, integration, keycloak-svc]
   when: freeipa_create_keycloak_svc | default(true) | bool
 
+- name: "Create Kerberos service principals for all IT-Stack services"
+  ansible.builtin.import_tasks: kerberos-service-principals.yml
+  tags: [freeipa, kerberos, principals]
+  when: freeipa_create_kerberos_principals | default(true) | bool
+
 - name: "INT-11: Create FreePBX LDAP bind account + provision telephoneNumber"
   ansible.builtin.import_tasks: freepbx-service-account.yml
   tags: [freeipa, integration, freepbx-service-account]

@@ -8,3 +8,8 @@
 - name: "Import graylog configuration tasks"
   ansible.builtin.import_tasks: configure.yml
   tags: [graylog, configure]
+
+- name: "Configure Graylog log inputs and streams for all IT-Stack services"
+  ansible.builtin.import_tasks: configure-inputs.yml
+  tags: [graylog, inputs, streams]
+  when: graylog_configure_inputs | default(true) | bool

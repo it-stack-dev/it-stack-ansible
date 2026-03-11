@@ -27,3 +27,46 @@ freeipa_firewall_ports:
   - { port: 88,  proto: udp, from: "10.0.50.0/24" }
   - { port: 53,  proto: udp, from: "10.0.50.0/24" }
   - { port: 53,  proto: tcp, from: "10.0.50.0/24" }
+
+# Control flags for kerberos-service-principals.yml
+freeipa_create_kerberos_principals: true
+freeipa_manage_dns_kerberos:        true
+
+# Hosts that will use HTTP/SPNEGO (browser Kerberos SSO via Negotiate)
+freeipa_http_hosts:
+  - "lab-id1"
+  - "lab-app1"
+  - "lab-comm1"
+  - "lab-proxy1"
+  - "lab-biz1"
+  - "lab-mgmt1"
+
+# Service principals to create and (optionally) export as keytabs
+# service: Kerberos service type (ldap, smtp, imap, postgres, ...)
+# host:    short hostname (FQDN = host + '.' + freeipa_domain)
+# owner:   OS user that will own the keytab file
+# export_keytab: set false to skip ipa-getkeytab for read-only principals
+freeipa_kerberos_principals:
+  # PostgreSQL — DB Kerberos auth for internal clients
+  - { service: "postgres",  host: "lab-db1",    owner: "postgres",    group: "postgres",  mode: "0640" }
+  # Redis — mutual auth (future: GSSAPI)
+  - { service: "redis",     host: "lab-db1",    owner: "redis",       group: "redis",     mode: "0640" }
+  # Nextcloud — SPNEGO native-app auth
+  - { service: "HTTP",      host: "lab-app1",   owner: "www-data",    group: "www-data",  mode: "0640" }
+  # Mattermost — Kerberos token auth
+  - { service: "HTTP",      host: "lab-app1",   owner: "mattermost",  group: "mattermost",mode: "0640", export_keytab: false }
+  # iRedMail — SASL/GSSAPI for SMTP + IMAP
+  - { service: "smtp",      host: "lab-comm1",  owner: "postfix",     group: "postfix",   mode: "0640" }
+  - { service: "imap",      host: "lab-comm1",  owner: "dovecot",     group: "dovecot",   mode: "0640" }
+  # Zammad — service-to-service auth
+  - { service: "HTTP",      host: "lab-comm1",  owner: "zammad",      group: "zammad",    mode: "0640" }
+  # Traefik — forward-auth via Kerberos
+  - { service: "HTTP",      host: "lab-proxy1", owner: "traefik",     group: "traefik",   mode: "0640" }
+  # FreePBX — Asterisk Kerberos SIP auth
+  - { service: "sip",       host: "lab-pbx1",   owner: "asterisk",    group: "asterisk",  mode: "0640" }
+  # SuiteCRM — CalDAV mutual auth
+  - { service: "HTTP",      host: "lab-biz1",   owner: "www-data",    group: "www-data",  mode: "0640" }
+  # Odoo — LDAP bind keytab
+  - { service: "ldap",      host: "lab-biz1",   owner: "odoo",        group: "odoo",      mode: "0640" }
+  # Taiga — auth service
+  - { service: "HTTP",      host: "lab-mgmt1",  owner: "taiga",       group: "taiga",     mode: "0640" }

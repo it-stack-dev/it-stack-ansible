@@ -42,3 +42,35 @@ zabbix_firewall_ports:
   - { port: "10051", proto: tcp, from: "10.0.50.0/24" }
   - { port: "10050", proto: tcp, from: "10.0.50.0/24" }
   - { port: "80",    proto: tcp, from: "10.0.50.0/24" }
+
+# URL for the Zabbix API (used by register-hosts.yml)
+zabbix_api_url:           "http://localhost/zabbix"
+
+# Set to false to skip auto-registration during a zabbix-only run
+zabbix_register_hosts:    true
+
+# Per-service TCP port checks added to "IT-Stack Service Checks" template
+zabbix_service_checks:
+  - { name: "FreeIPA LDAP",      host: "10.0.50.11", port: 389 }
+  - { name: "FreeIPA LDAPS",     host: "10.0.50.11", port: 636 }
+  - { name: "FreeIPA HTTP",      host: "10.0.50.11", port: 80  }
+  - { name: "Keycloak HTTP",     host: "10.0.50.11", port: 8080 }
+  - { name: "PostgreSQL",        host: "10.0.50.12", port: 5432 }
+  - { name: "Redis",             host: "10.0.50.12", port: 6379 }
+  - { name: "Elasticsearch",     host: "10.0.50.12", port: 9200 }
+  - { name: "Nextcloud",         host: "10.0.50.13", port: 443  }
+  - { name: "Mattermost",        host: "10.0.50.13", port: 8065 }
+  - { name: "Jitsi",             host: "10.0.50.13", port: 443  }
+  - { name: "iRedMail SMTP",     host: "10.0.50.14", port: 25   }
+  - { name: "iRedMail IMAPS",    host: "10.0.50.14", port: 993  }
+  - { name: "Zammad",            host: "10.0.50.14", port: 3000 }
+  - { name: "Traefik HTTP",      host: "10.0.50.15", port: 80   }
+  - { name: "Traefik HTTPS",     host: "10.0.50.15", port: 443  }
+  - { name: "Graylog",           host: "10.0.50.15", port: 9000 }
+  - { name: "FreePBX SIP",       host: "10.0.50.16", port: 5060 }
+  - { name: "SuiteCRM",          host: "10.0.50.17", port: 443  }
+  - { name: "Odoo",              host: "10.0.50.17", port: 8069 }
+  - { name: "OpenKM",            host: "10.0.50.17", port: 8080 }
+  - { name: "Taiga",             host: "10.0.50.18", port: 443  }
+  - { name: "Snipe-IT",          host: "10.0.50.18", port: 443  }
+  - { name: "GLPI",              host: "10.0.50.18", port: 443  }
